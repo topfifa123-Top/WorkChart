@@ -398,7 +398,7 @@ function SpecGroup({ label, prefix, form, set }) {
   );
 }
 
-function TaskModal({ task, users, currentUser, settings, onClose, onSave, onDelete, onAddComment }) {
+function TaskModal({ task, users, currentUser, settings, onClose, onSave, onDelete, onAddComment, notify }) {
   const [form, setForm] = useState(
     task || {
       title: "", description: "", project: "", status: "backlog", priority: "medium", assignee: "", dueDate: "",
@@ -416,6 +416,8 @@ function TaskModal({ task, users, currentUser, settings, onClose, onSave, onDele
   const [pendingDone, setPendingDone] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [commentText, setCommentText] = useState("");
+  const [linkName, setLinkName] = useState("");
+  const [linkUrl, setLinkUrl] = useState("");
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const canAssign = currentUser.role === "lead" || currentUser.role === "admin";
   const needsApproval = !task?.id && currentUser.role === "sales";
@@ -426,18 +428,34 @@ function TaskModal({ task, users, currentUser, settings, onClose, onSave, onDele
     if (!files.length) return;
     setUploading(true);
     for (const file of files) {
+      if (file.size > 30 * 1024 * 1024) {
+        notify(`${file.name} is over 30MB — skipped`, "error");
+        continue;
+      }
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 180000); // 3 minutes
       try {
         const dataUrl = await fileToDataUrl(file);
         const res = await fetch(settings.sheetsUrl, {
           method: "POST",
           headers: { "Content-Type": "text/plain;charset=utf-8" },
           body: JSON.stringify({ action: "uploadFile", name: file.name, mimeType: file.type, data: dataUrl.split(",")[1] }),
+          signal: controller.signal,
         });
         const json = await res.json();
         if (json.url) {
           setForm((f) => ({ ...f, attachments: [...(f.attachments || []), { name: file.name, url: json.url }] }));
+        } else {
+          notify(`Failed to upload ${file.name}`, "error");
         }
-      } catch (err) { /* one file failing shouldn't block the others */ }
+      } catch (err) {
+        notify(
+          err.name === "AbortError" ? `Uploading ${file.name} timed out after 3 minutes` : `Failed to upload ${file.name}`,
+          "error"
+        );
+      } finally {
+        clearTimeout(timeoutId);
+      }
     }
     setUploading(false);
     e.target.value = "";
@@ -445,6 +463,13 @@ function TaskModal({ task, users, currentUser, settings, onClose, onSave, onDele
 
   const removeAttachment = (idx) => {
     setForm((f) => ({ ...f, attachments: f.attachments.filter((_, i) => i !== idx) }));
+  };
+
+  const addAttachmentLink = () => {
+    if (!linkUrl.trim()) return;
+    setForm((f) => ({ ...f, attachments: [...(f.attachments || []), { name: linkName.trim() || "Linked file", url: linkUrl.trim() }] }));
+    setLinkName("");
+    setLinkUrl("");
   };
 
   const postComment = () => {
@@ -611,21 +636,28 @@ function TaskModal({ task, users, currentUser, settings, onClose, onSave, onDele
           <>
             <input type="file" multiple onChange={handleFileUpload} disabled={uploading}
               className="text-xs w-full" style={{ color: "var(--c-text-dim)" }} />
+            <p className="text-xs mt-1" style={{ color: "var(--c-text-dim)" }}>Files over 30MB — upload to the "GateFlow Attachments" Drive folder yourself and paste the share link below instead.</p>
             {uploading && <p className="text-xs mt-1" style={{ color: "var(--c-text-dim)" }}>Uploading...</p>}
-            {(form.attachments || []).length > 0 && (
-              <div className="flex flex-wrap gap-2 mt-2">
-                {form.attachments.map((a, i) => (
-                  <div key={i} className="flex items-center gap-1.5 text-xs pl-2.5 pr-1.5 py-1 rounded-md"
-                    style={{ background: "var(--c-surface-2)", border: "1px solid var(--c-border)" }}>
-                    <a href={a.url} target="_blank" rel="noreferrer" style={{ color: "var(--c-info)" }}>{a.name}</a>
-                    <button onClick={() => removeAttachment(i)} style={{ color: "var(--c-text-dim)" }}><X size={12} /></button>
-                  </div>
-                ))}
-              </div>
-            )}
           </>
         ) : (
-          <p className="text-xs" style={{ color: "var(--c-text-dim)" }}>Connect Google Sheets in Settings to enable file attachments.</p>
+          <p className="text-xs" style={{ color: "var(--c-text-dim)" }}>Connect Google Sheets in Settings to upload files directly — pasting a link below always works.</p>
+        )}
+        <div className="flex flex-col sm:flex-row gap-2 mt-2">
+          <Input placeholder="File name (optional)" value={linkName} onChange={(e) => setLinkName(e.target.value)} style={{ flex: "0 0 auto", width: "100%", maxWidth: 180 }} />
+          <Input placeholder="Paste a Google Drive (or any) link" value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && addAttachmentLink()} />
+          <Button size="sm" variant="subtle" onClick={addAttachmentLink}>Add link</Button>
+        </div>
+        {(form.attachments || []).length > 0 && (
+          <div className="flex flex-wrap gap-2 mt-2">
+            {form.attachments.map((a, i) => (
+              <div key={i} className="flex items-center gap-1.5 text-xs pl-2.5 pr-1.5 py-1 rounded-md"
+                style={{ background: "var(--c-surface-2)", border: "1px solid var(--c-border)" }}>
+                <a href={a.url} target="_blank" rel="noreferrer" style={{ color: "var(--c-info)" }}>{a.name}</a>
+                <button onClick={() => removeAttachment(i)} style={{ color: "var(--c-text-dim)" }}><X size={12} /></button>
+              </div>
+            ))}
+          </div>
         )}
       </Field>
 
@@ -1284,7 +1316,7 @@ export default function App() {
       </div>
 
       {taskModal !== null && (
-        <TaskModal task={taskModal.task} users={users} currentUser={currentUser} settings={settings} onClose={() => setTaskModal(null)} onSave={saveTask} onDelete={deleteTask} onAddComment={addComment} />
+        <TaskModal task={taskModal.task} users={users} currentUser={currentUser} settings={settings} onClose={() => setTaskModal(null)} onSave={saveTask} onDelete={deleteTask} onAddComment={addComment} notify={notify} />
       )}
       <Toast toast={toast} />
     </div>
