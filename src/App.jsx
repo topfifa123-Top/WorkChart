@@ -230,13 +230,13 @@ function LoginScreen({ users, onLogin, notify }) {
   };
 
   return (
-    <div className="min-h-screen w-full flex items-center justify-center px-4" style={{ background: "var(--c-bg)" }}>
+    <div className="min-h-screen w-full flex items-center justify-center px-4" style={{ background: "var(--c-bg)", color: "var(--c-text)" }}>
       <div className="w-full" style={{ maxWidth: 380 }}>
         <div className="flex items-center gap-2 mb-8 justify-center">
           <div className="w-9 h-9 rounded-lg flex items-center justify-center" style={{ background: "var(--c-accent)" }}>
             <ShieldCheck size={20} color="#06251c" />
           </div>
-          <span style={{ fontFamily: "var(--f-display)", fontSize: 22, fontWeight: 700, letterSpacing: -0.5 }}>GateFlow</span>
+          <span style={{ fontFamily: "var(--f-display)", fontSize: 22, fontWeight: 700, letterSpacing: -0.5, color: "var(--c-text)" }}>GateFlow</span>
         </div>
         <div className="rounded-2xl p-6" style={{ background: "var(--c-surface)", border: "1px solid var(--c-border)" }}>
           <p className="text-sm mb-5" style={{ color: "var(--c-text-dim)" }}>Sign in to manage tasks and approval requests</p>
@@ -248,21 +248,7 @@ function LoginScreen({ users, onLogin, notify }) {
               onKeyDown={(e) => e.key === "Enter" && tryLogin(username, password)} placeholder="••••••••" />
           </Field>
           <Button className="w-full justify-center mt-2" onClick={() => tryLogin(username, password)}>Sign in</Button>
-
-          <div className="mt-5 pt-4" style={{ borderTop: "1px solid var(--c-border)" }}>
-            <p className="text-xs mb-2" style={{ color: "var(--c-text-dim)" }}>Quick demo sign-in</p>
-            <div className="flex flex-wrap gap-2">
-              {DEFAULT_USERS.map((u) => (
-                <Button key={u.id} variant="subtle" size="sm" onClick={() => tryLogin(u.username, u.password)}>
-                  {u.name}
-                </Button>
-              ))}
-            </div>
-          </div>
         </div>
-        <p className="text-center text-xs mt-4" style={{ color: "var(--c-text-dim)" }}>
-          Demo accounts: admin/admin123 · sales/sales123 · lead/lead123
-        </p>
       </div>
     </div>
   );
@@ -357,22 +343,18 @@ function Topbar({ title, user, onLogout, onMenuClick }) {
 /* Task Modal                                                             */
 /* ---------------------------------------------------------------------- */
 
-function TaskModal({ task, users, onClose, onSave, onDelete }) {
+function TaskModal({ task, users, currentUser, onClose, onSave, onDelete }) {
   const [form, setForm] = useState(
     task || { title: "", description: "", project: "", status: "backlog", priority: "medium", assignee: "", dueDate: "" }
   );
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const canAssign = currentUser.role === "lead" || currentUser.role === "admin";
   return (
     <Modal title={task?.id ? `Edit task ${task.ticket || ""}` : "New task"} onClose={onClose} wide>
       <Field label="Task title"><Input value={form.title} onChange={(e) => set("title", e.target.value)} placeholder="e.g. Set up API for client X" /></Field>
       <Field label="Description"><TextArea value={form.description} onChange={(e) => set("description", e.target.value)} /></Field>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="Assignee">
-          <Select value={form.assignee} onChange={(e) => set("assignee", e.target.value)}>
-            <option value="">Unassigned</option>
-            {users.map((u) => <option key={u.id} value={u.name}>{u.name}</option>)}
-          </Select>
-        </Field>
+        <Field label="Project"><Input value={form.project} onChange={(e) => set("project", e.target.value)} placeholder="Project / client name" /></Field>
         <Field label="Status">
           <Select value={form.status} onChange={(e) => set("status", e.target.value)}>
             {STATUSES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
@@ -384,6 +366,20 @@ function TaskModal({ task, users, onClose, onSave, onDelete }) {
           </Select>
         </Field>
         <Field label="Due date"><Input type="date" value={form.dueDate} onChange={(e) => set("dueDate", e.target.value)} /></Field>
+        {task?.id && (
+          <Field label="Assignee">
+            {canAssign ? (
+              <Select value={form.assignee} onChange={(e) => set("assignee", e.target.value)}>
+                <option value="">Unassigned</option>
+                {users.map((u) => <option key={u.id} value={u.name}>{u.name}</option>)}
+              </Select>
+            ) : (
+              <div style={{ ...inputStyle, opacity: 0.7, cursor: "not-allowed" }}>
+                {form.assignee || "Unassigned"}
+              </div>
+            )}
+          </Field>
+        )}
       </div>
       <div className="flex items-center justify-between mt-4">
         <div>
@@ -1049,7 +1045,7 @@ export default function App() {
       </div>
 
       {taskModal !== null && (
-        <TaskModal task={taskModal.task} users={users} onClose={() => setTaskModal(null)} onSave={saveTask} onDelete={deleteTask} />
+        <TaskModal task={taskModal.task} users={users} currentUser={currentUser} onClose={() => setTaskModal(null)} onSave={saveTask} onDelete={deleteTask} />
       )}
       {approvalModal && <ApprovalModal onClose={() => setApprovalModal(false)} onSave={saveApproval} currentUser={currentUser} />}
       <Toast toast={toast} />
