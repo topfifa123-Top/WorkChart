@@ -18,7 +18,7 @@ const STORAGE_SHARED = true;
 const APP_PREFIX = "gateflow";
 
 const STATUSES = [
-  { key: "backlog", label: "Backlog", color: "var(--c-text-dim)" },
+  { key: "backlog", label: "Not Started", color: "var(--c-text-dim)" },
   { key: "todo", label: "To Do", color: "var(--c-info)" },
   { key: "inprogress", label: "In Progress", color: "var(--c-amber)" },
   { key: "review", label: "Review", color: "var(--c-purple)" },
@@ -39,9 +39,9 @@ const ROLES = [
 ];
 
 const DEFAULT_USERS = [
-  { id: "u1", username: "admin", password: "admin123", name: "Admin", role: "admin" },
-  { id: "u2", username: "sales", password: "sales123", name: "Sales Team", role: "sales" },
-  { id: "u3", username: "lead", password: "lead123", name: "Tech Lead", role: "lead" },
+  { id: "u1", username: "admin", password: "admin123", name: "Admin", role: "admin", email: "admin@example.com" },
+  { id: "u2", username: "sales", password: "sales123", name: "Sales Team", role: "sales", email: "sales@example.com" },
+  { id: "u3", username: "lead", password: "lead123", name: "Tech Lead", role: "lead", email: "lead@example.com" },
 ];
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -400,25 +400,106 @@ function TaskModal({ task, users, currentUser, onClose, onSave, onDelete }) {
 /* Approval Request Modal                                                 */
 /* ---------------------------------------------------------------------- */
 
-function ApprovalModal({ onClose, onSave, currentUser }) {
-  const [form, setForm] = useState({ title: "", description: "", project: "", priority: "medium", dueDate: "" });
-  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+function SpecGroup({ label, prefix, form, set }) {
   return (
-    <Modal title="New Requirement Request" onClose={onClose} wide>
-      <Field label="Requirement title"><Input value={form.title} onChange={(e) => set("title", e.target.value)} placeholder="e.g. Client requested PDF export feature" /></Field>
-      <Field label="Description / client requirement"><TextArea value={form.description} onChange={(e) => set("description", e.target.value)} /></Field>
+    <div className="mb-3">
+      <div className="text-xs font-medium mb-1" style={{ color: "var(--c-text-dim)" }}>{label}</div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        <Input placeholder="Model" value={form[prefix + "Model"] || ""} onChange={(e) => set(prefix + "Model", e.target.value)} />
+        <Input placeholder="Specification" value={form[prefix + "Spec"] || ""} onChange={(e) => set(prefix + "Spec", e.target.value)} />
+        <Input placeholder="Others" value={form[prefix + "Others"] || ""} onChange={(e) => set(prefix + "Others", e.target.value)} />
+      </div>
+    </div>
+  );
+}
+
+function ApprovalModal({ onClose, onSave, currentUser }) {
+  const [form, setForm] = useState({
+    project: "", contactPerson: "", contactNumber: "", supportType: "", products: "",
+    description: "", priority: "medium", dueDate: "",
+    objName: "", objSize: "", objType: "", objColour: "", objMaterial: "", objReturn: "",
+    mainPurpose: "", movingSpeed: "", fov: "", accuracy: "", background: "",
+    cameraModel: "", cameraSpec: "", cameraOthers: "",
+    lensModel: "", lensSpec: "", lensOthers: "",
+    lightModel: "", lightSpec: "", lightOthers: "",
+    spaceMin: "", spaceMax: "", cameraWD: "", lensWD: "", lightWD: "", lightDimension: "",
+  });
+  const [showTech, setShowTech] = useState(false);
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  const submit = () => {
+    const title = `${form.project || "Untitled"} — ${form.products || "Testing request"}`;
+    onSave({ ...form, title, requestedBy: currentUser.name });
+  };
+
+  return (
+    <Modal title="New Testing Request" onClose={onClose} wide>
+      <Field label="Company Name"><Input value={form.project} onChange={(e) => set("project", e.target.value)} placeholder="Client company name" /></Field>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="Project / client"><Input value={form.project} onChange={(e) => set("project", e.target.value)} /></Field>
+        <Field label="Contact Person"><Input value={form.contactPerson} onChange={(e) => set("contactPerson", e.target.value)} /></Field>
+        <Field label="Contact Number"><Input value={form.contactNumber} onChange={(e) => set("contactNumber", e.target.value)} /></Field>
+        <Field label="Support Type"><Input value={form.supportType} onChange={(e) => set("supportType", e.target.value)} placeholder="e.g. On-site testing" /></Field>
+        <Field label="Products"><Input value={form.products} onChange={(e) => set("products", e.target.value)} placeholder="e.g. Machine vision camera system" /></Field>
+      </div>
+      <Field label="Problems / Requirements"><TextArea value={form.description} onChange={(e) => set("description", e.target.value)} /></Field>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Priority">
           <Select value={form.priority} onChange={(e) => set("priority", e.target.value)}>
             {PRIORITIES.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
           </Select>
         </Field>
-        <Field label="Requested date"><Input type="date" value={form.dueDate} onChange={(e) => set("dueDate", e.target.value)} /></Field>
+        <Field label="Deadline"><Input type="date" value={form.dueDate} onChange={(e) => set("dueDate", e.target.value)} /></Field>
       </div>
-      <div className="flex justify-end gap-2 mt-4">
+
+      <Button variant="ghost" size="sm" className="w-full justify-center mb-3" onClick={() => setShowTech((s) => !s)}>
+        {showTech ? "\u2212 Hide technical details" : "+ Add technical details (optional)"}
+      </Button>
+
+      {showTech && (
+        <div className="rounded-lg p-3 mb-3" style={{ background: "var(--c-surface-2)", border: "1px solid var(--c-border)" }}>
+          <div className="text-xs font-semibold mb-2" style={{ color: "var(--c-text-dim)" }}>Object Characteristics</div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
+            <Input placeholder="Object name" value={form.objName} onChange={(e) => set("objName", e.target.value)} />
+            <Input placeholder="Object size" value={form.objSize} onChange={(e) => set("objSize", e.target.value)} />
+            <Input placeholder="Object type" value={form.objType} onChange={(e) => set("objType", e.target.value)} />
+            <Input placeholder="Object colour" value={form.objColour} onChange={(e) => set("objColour", e.target.value)} />
+            <Input placeholder="Object material" value={form.objMaterial} onChange={(e) => set("objMaterial", e.target.value)} />
+            <Select value={form.objReturn} onChange={(e) => set("objReturn", e.target.value)}>
+              <option value="">Needs to return object?</option>
+              <option value="Yes">Yes, needs to return</option>
+              <option value="No">No, does not need to return</option>
+            </Select>
+          </div>
+
+          <div className="text-xs font-semibold mb-2" style={{ color: "var(--c-text-dim)" }}>Detection Requirement</div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
+            <Input placeholder="Main purpose" value={form.mainPurpose} onChange={(e) => set("mainPurpose", e.target.value)} />
+            <Input placeholder="Moving speed (mm/s)" value={form.movingSpeed} onChange={(e) => set("movingSpeed", e.target.value)} />
+            <Input placeholder="FOV" value={form.fov} onChange={(e) => set("fov", e.target.value)} />
+            <Input placeholder="Accuracy (mm/pixel)" value={form.accuracy} onChange={(e) => set("accuracy", e.target.value)} />
+            <Input placeholder="Background" value={form.background} onChange={(e) => set("background", e.target.value)} />
+          </div>
+
+          <div className="text-xs font-semibold mb-2" style={{ color: "var(--c-text-dim)" }}>Hardware Specifications</div>
+          <SpecGroup label="Camera" prefix="camera" form={form} set={set} />
+          <SpecGroup label="Lens" prefix="lens" form={form} set={set} />
+          <SpecGroup label="Light source" prefix="light" form={form} set={set} />
+
+          <div className="text-xs font-semibold mb-2 mt-1" style={{ color: "var(--c-text-dim)" }}>Space Limitation</div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <Input placeholder="Minimum (mm)" value={form.spaceMin} onChange={(e) => set("spaceMin", e.target.value)} />
+            <Input placeholder="Maximum (mm)" value={form.spaceMax} onChange={(e) => set("spaceMax", e.target.value)} />
+            <Input placeholder="Camera WD" value={form.cameraWD} onChange={(e) => set("cameraWD", e.target.value)} />
+            <Input placeholder="Lens WD" value={form.lensWD} onChange={(e) => set("lensWD", e.target.value)} />
+            <Input placeholder="Light source WD" value={form.lightWD} onChange={(e) => set("lightWD", e.target.value)} />
+            <Input placeholder="Light source dimension" value={form.lightDimension} onChange={(e) => set("lightDimension", e.target.value)} />
+          </div>
+        </div>
+      )}
+
+      <div className="flex justify-end gap-2 mt-2">
         <Button variant="ghost" onClick={onClose}>Cancel</Button>
-        <Button onClick={() => form.title.trim() && onSave({ ...form, requestedBy: currentUser.name })}>Submit request</Button>
+        <Button disabled={!form.project.trim() || !form.products.trim()} onClick={submit}>Submit request</Button>
       </div>
     </Modal>
   );
@@ -750,8 +831,28 @@ function CalendarView({ tasks, onOpen }) {
 function ApprovalCard({ approval, canDecide, onDecide }) {
   const [comment, setComment] = useState("");
   const [acting, setActing] = useState(null);
+  const [showTech, setShowTech] = useState(false);
   const statusColor = approval.status === "pending" ? "var(--c-amber)" : approval.status === "approved" ? "var(--c-accent)" : "var(--c-danger)";
   const p = PRIORITIES.find((x) => x.key === approval.priority);
+
+  const techFields = [
+    ["Object", [approval.objName, approval.objSize, approval.objType, approval.objColour, approval.objMaterial].filter(Boolean).join(" / ")],
+    ["Return object?", approval.objReturn],
+    ["Main purpose", approval.mainPurpose],
+    ["Moving speed", approval.movingSpeed],
+    ["FOV", approval.fov],
+    ["Accuracy", approval.accuracy],
+    ["Background", approval.background],
+    ["Camera", [approval.cameraModel, approval.cameraSpec, approval.cameraOthers].filter(Boolean).join(" / ")],
+    ["Lens", [approval.lensModel, approval.lensSpec, approval.lensOthers].filter(Boolean).join(" / ")],
+    ["Light source", [approval.lightModel, approval.lightSpec, approval.lightOthers].filter(Boolean).join(" / ")],
+    ["Space min/max (mm)", [approval.spaceMin, approval.spaceMax].filter(Boolean).join(" - ")],
+    ["Camera WD", approval.cameraWD],
+    ["Lens WD", approval.lensWD],
+    ["Light source WD", approval.lightWD],
+    ["Light source dimension", approval.lightDimension],
+  ].filter(([, v]) => v);
+
   return (
     <div className="rounded-xl p-4" style={{ background: "var(--c-surface)", border: "1px solid var(--c-border)" }}>
       <div className="flex items-start justify-between gap-3">
@@ -761,20 +862,39 @@ function ApprovalCard({ approval, canDecide, onDecide }) {
             <Badge color={p?.color}>{p?.label}</Badge>
           </div>
           <div className="font-medium">{approval.title}</div>
-          {approval.project && <div className="text-xs mt-0.5" style={{ color: "var(--c-text-dim)" }}>{approval.project}</div>}
+          {approval.supportType && <div className="text-xs mt-0.5" style={{ color: "var(--c-text-dim)" }}>{approval.supportType}</div>}
         </div>
         <Badge color={statusColor}>
           {approval.status === "pending" ? "Pending" : approval.status === "approved" ? "Approved" : "Rejected"}
         </Badge>
       </div>
       {approval.description && <p className="text-sm mt-2" style={{ color: "var(--c-text-dim)" }}>{approval.description}</p>}
-      <div className="flex items-center gap-4 text-xs mt-3" style={{ color: "var(--c-text-dim)" }}>
-        <span>Requested by: {approval.requestedBy}</span>
-        {approval.dueDate && <span>Needed by: {fmtDate(approval.dueDate)}</span>}
+      <div className="text-xs mt-3 space-y-1" style={{ color: "var(--c-text-dim)" }}>
+        {(approval.contactPerson || approval.contactNumber) && (
+          <div>Contact: {approval.contactPerson || "-"}{approval.contactNumber ? ` / ${approval.contactNumber}` : ""}</div>
+        )}
+        <div className="flex items-center gap-4">
+          <span>Requested by: {approval.requestedBy}</span>
+          {approval.dueDate && <span>Needed by: {fmtDate(approval.dueDate)}</span>}
+        </div>
       </div>
       {approval.leadComment && (
         <div className="text-xs mt-2 px-2 py-1.5 rounded" style={{ background: "var(--c-surface-2)", color: "var(--c-text-dim)" }}>
           Team lead's comment: {approval.leadComment}
+        </div>
+      )}
+      {techFields.length > 0 && (
+        <div className="mt-3">
+          <button onClick={() => setShowTech((s) => !s)} className="text-xs" style={{ color: "var(--c-info)" }}>
+            {showTech ? "\u2212 Hide technical details" : "+ View technical details"}
+          </button>
+          {showTech && (
+            <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-xs p-2 rounded" style={{ background: "var(--c-surface-2)" }}>
+              {techFields.map(([label, value]) => (
+                <div key={label}><span style={{ color: "var(--c-text-dim)" }}>{label}: </span>{value}</div>
+              ))}
+            </div>
+          )}
         </div>
       )}
       {canDecide && approval.status === "pending" && (
@@ -838,7 +958,7 @@ function SettingsView({ settings, setSettings, users, setUsers, currentUser, not
   const [url, setUrl] = useState(settings.sheetsUrl);
   const [useSheets, setUseSheets] = useState(settings.useSheets);
   const [testing, setTesting] = useState(false);
-  const [newUser, setNewUser] = useState({ username: "", password: "", name: "", role: "member" });
+  const [newUser, setNewUser] = useState({ username: "", password: "", name: "", email: "", role: "member" });
 
   const testConnection = async () => {
     if (!url.trim()) { notify("Please enter the Web App URL", "error"); return; }
@@ -862,9 +982,9 @@ function SettingsView({ settings, setSettings, users, setUsers, currentUser, not
   };
 
   const addUser = () => {
-    if (!newUser.username || !newUser.password || !newUser.name) { notify("Please fill in all fields", "error"); return; }
+    if (!newUser.username || !newUser.password || !newUser.name || !newUser.email) { notify("Please fill in all fields", "error"); return; }
     setUsers([...users, { id: uid(), ...newUser }]);
-    setNewUser({ username: "", password: "", name: "", role: "member" });
+    setNewUser({ username: "", password: "", name: "", email: "", role: "member" });
     notify("Member added", "success");
   };
 
@@ -873,7 +993,7 @@ function SettingsView({ settings, setSettings, users, setUsers, currentUser, not
       <div className="rounded-xl p-5" style={{ background: "var(--c-surface)", border: "1px solid var(--c-border)" }}>
         <h3 className="font-semibold mb-1 flex items-center gap-2"><Link2 size={16} /> Connect Google Sheets</h3>
         <p className="text-xs mb-4" style={{ color: "var(--c-text-dim)" }}>
-          Uses a Google Apps Script Web App as a secure bridge to your Google Sheet (see the setup steps shared in chat)
+          Uses a Google Apps Script Web App as a secure bridge to your Google Sheet (see the setup steps shared in chat). When connected, GateFlow also emails Technical Leaders on new requests, emails Sales on approval decisions, and syncs task due dates to the assignee's Google Calendar — this needs each team member's email set below.
         </p>
         <Field label="Apps Script Web App URL">
           <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://script.google.com/macros/s/xxxx/exec" />
@@ -896,13 +1016,17 @@ function SettingsView({ settings, setSettings, users, setUsers, currentUser, not
           <div className="space-y-2 mb-4">
             {users.map((u) => (
               <div key={u.id} className="flex items-center justify-between text-sm px-3 py-2 rounded-lg" style={{ background: "var(--c-surface-2)" }}>
-                <span>{u.name} <span style={{ color: "var(--c-text-dim)" }}>({u.username})</span></span>
+                <div>
+                  <div>{u.name} <span style={{ color: "var(--c-text-dim)" }}>({u.username})</span></div>
+                  {u.email && <div className="text-xs" style={{ color: "var(--c-text-dim)" }}>{u.email}</div>}
+                </div>
                 <Badge color="var(--c-info)">{ROLES.find((r) => r.key === u.role)?.label}</Badge>
               </div>
             ))}
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <Input placeholder="Name" value={newUser.name} onChange={(e) => setNewUser({ ...newUser, name: e.target.value })} />
+            <Input placeholder="Email (for notifications)" type="email" value={newUser.email} onChange={(e) => setNewUser({ ...newUser, email: e.target.value })} />
             <Input placeholder="username" value={newUser.username} onChange={(e) => setNewUser({ ...newUser, username: e.target.value })} />
             <Input placeholder="password" value={newUser.password} onChange={(e) => setNewUser({ ...newUser, password: e.target.value })} />
             <Select value={newUser.role} onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}>
@@ -971,7 +1095,7 @@ export default function App() {
     if (form.id) {
       updateTasks(tasks.map((t) => (t.id === form.id ? { ...form } : t)));
     } else {
-      const ticket = nextTicket(tasks, "ticket", "TSK");
+      const ticket = nextTicket(tasks, "ticket", "OPT");
       updateTasks([...tasks, { ...form, id: uid(), ticket, createdBy: currentUser.name, createdAt: new Date().toISOString() }]);
     }
     setTaskModal(null);
@@ -992,14 +1116,14 @@ export default function App() {
     const status = decision === "approve" ? "approved" : "rejected";
     updateApprovals(approvals.map((a) => (a.id === id ? { ...a, status, leadComment: comment } : a)));
     if (decision === "approve") {
-      const ticket = nextTicket(tasks, "ticket", "TSK");
+      const ticket = nextTicket(tasks, "ticket", "OPT");
       updateTasks([...tasks, {
-        id: uid(), ticket, title: approval.title, description: approval.description,
-        project: approval.project, status: "backlog", priority: approval.priority,
-        assignee: "", dueDate: approval.dueDate, sourceApprovalId: approval.id,
+        ...approval,
+        id: uid(), ticket, status: "backlog", assignee: "",
+        sourceApprovalId: approval.id,
         createdBy: approval.requestedBy, createdAt: new Date().toISOString(),
       }]);
-      notify("Approved — new task created in Backlog");
+      notify("Approved — new task created in Not Started");
     } else {
       notify("Request rejected", "info");
     }
