@@ -16,6 +16,9 @@ import {
 
 const STORAGE_SHARED = true;
 const APP_PREFIX = "gateflow";
+// Baked-in default: every device connects to the team's shared Google Sheet
+// automatically, unless that browser has explicitly saved its own settings.
+const DEFAULT_SETTINGS = { useSheets: true, sheetsUrl: "https://script.google.com/macros/s/AKfycbxBtjL8OCh3oLxFRn_rSOcjrqFY_KHX2ET1AN5ri3Jx_4EyR-Kw0ZY_6QNEw8PUPQOS/exec" };
 
 const STATUSES = [
   { key: "pending", label: "Pending Approval", color: "var(--c-rose)" },
@@ -73,11 +76,9 @@ function isOverdue(task) {
 /* Data layer — local shared storage, or Google Sheets bridge             */
 /* ---------------------------------------------------------------------- */
 
-// NOTE: this build runs as a real deployed website (not inside a Claude
-// artifact), so it uses the browser's own localStorage instead of the
-// Claude-only window.storage API. localStorage is per-browser/per-device —
-// each teammate's data stays on their own machine until Google Sheets sync
-// is turned on in Settings, at which point everyone reads/writes the same Sheet.
+// This build runs inside a Claude artifact, so it uses the Claude-only
+// window.storage API (shared=true) so every teammate viewing this artifact
+// sees the same data.
 
 async function loadCollection(key, settings) {
   if (settings.useSheets && settings.sheetsUrl) {
@@ -87,8 +88,8 @@ async function loadCollection(key, settings) {
     return Array.isArray(json.data) ? json.data : [];
   }
   try {
-    const raw = localStorage.getItem(`${APP_PREFIX}:${key}`);
-    return raw ? JSON.parse(raw) : [];
+    const r = await window.storage.get(`${APP_PREFIX}:${key}`, STORAGE_SHARED);
+    return r ? JSON.parse(r.value) : [];
   } catch {
     return [];
   }
@@ -104,19 +105,19 @@ async function saveCollection(key, data, settings) {
     if (!res.ok) throw new Error("Sheets save failed");
     return;
   }
-  localStorage.setItem(`${APP_PREFIX}:${key}`, JSON.stringify(data));
+  await window.storage.set(`${APP_PREFIX}:${key}`, JSON.stringify(data), STORAGE_SHARED);
 }
 
 async function loadSettings() {
   try {
-    const raw = localStorage.getItem(`${APP_PREFIX}:settings`);
-    return raw ? JSON.parse(raw) : { useSheets: false, sheetsUrl: "" };
+    const r = await window.storage.get(`${APP_PREFIX}:settings`, STORAGE_SHARED);
+    return r ? JSON.parse(r.value) : DEFAULT_SETTINGS;
   } catch {
-    return { useSheets: false, sheetsUrl: "" };
+    return DEFAULT_SETTINGS;
   }
 }
 async function saveSettings(s) {
-  localStorage.setItem(`${APP_PREFIX}:settings`, JSON.stringify(s));
+  await window.storage.set(`${APP_PREFIX}:settings`, JSON.stringify(s), STORAGE_SHARED);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -920,7 +921,7 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [users, setUsers] = useState(DEFAULT_USERS);
   const [tasks, setTasks] = useState([]);
-  const [settings, setSettings] = useState({ useSheets: false, sheetsUrl: "" });
+  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [page, setPage] = useState("dashboard");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [toast, setToast] = useState(null);
