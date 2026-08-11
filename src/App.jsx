@@ -959,6 +959,7 @@ function SettingsView({ settings, setSettings, users, setUsers, currentUser, not
   const [useSheets, setUseSheets] = useState(settings.useSheets);
   const [testing, setTesting] = useState(false);
   const [newUser, setNewUser] = useState({ username: "", password: "", name: "", email: "", role: "member" });
+  const [editingId, setEditingId] = useState(null);
 
   const testConnection = async () => {
     if (!url.trim()) { notify("Please enter the Web App URL", "error"); return; }
@@ -988,6 +989,35 @@ function SettingsView({ settings, setSettings, users, setUsers, currentUser, not
     notify("Member added", "success");
   };
 
+  const startEdit = (u) => {
+    setEditingId(u.id);
+    setNewUser({ username: u.username, password: u.password, name: u.name, email: u.email || "", role: u.role });
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setNewUser({ username: "", password: "", name: "", email: "", role: "member" });
+  };
+
+  const saveEditedUser = () => {
+    if (!newUser.username || !newUser.password || !newUser.name || !newUser.email) { notify("Please fill in all fields", "error"); return; }
+    setUsers(users.map((u) => (u.id === editingId ? { ...u, ...newUser } : u)));
+    cancelEdit();
+    notify("Member updated", "success");
+  };
+
+  const deleteUser = (id) => {
+    if (id === currentUser.id) { notify("You can't delete your own account while logged in", "error"); return; }
+    const target = users.find((u) => u.id === id);
+    if (target?.role === "admin" && users.filter((u) => u.role === "admin").length <= 1) {
+      notify("Can't delete the last admin account", "error");
+      return;
+    }
+    setUsers(users.filter((u) => u.id !== id));
+    if (editingId === id) cancelEdit();
+    notify("Member removed", "success");
+  };
+
   return (
     <div className="p-5 md:p-8 max-w-2xl space-y-6">
       <div className="rounded-xl p-5" style={{ background: "var(--c-surface)", border: "1px solid var(--c-border)" }}>
@@ -1015,15 +1045,22 @@ function SettingsView({ settings, setSettings, users, setUsers, currentUser, not
           <h3 className="font-semibold mb-3 flex items-center gap-2"><Users size={16} /> Team members</h3>
           <div className="space-y-2 mb-4">
             {users.map((u) => (
-              <div key={u.id} className="flex items-center justify-between text-sm px-3 py-2 rounded-lg" style={{ background: "var(--c-surface-2)" }}>
-                <div>
+              <div key={u.id} className="flex items-center justify-between text-sm px-3 py-2 rounded-lg" style={{ background: editingId === u.id ? "var(--c-surface)" : "var(--c-surface-2)", border: editingId === u.id ? "1px solid var(--c-accent)" : "1px solid transparent" }}>
+                <div className="min-w-0">
                   <div>{u.name} <span style={{ color: "var(--c-text-dim)" }}>({u.username})</span></div>
                   {u.email && <div className="text-xs" style={{ color: "var(--c-text-dim)" }}>{u.email}</div>}
                 </div>
-                <Badge color="var(--c-info)">{ROLES.find((r) => r.key === u.role)?.label}</Badge>
+                <div className="flex items-center gap-2 shrink-0">
+                  <Badge color="var(--c-info)">{ROLES.find((r) => r.key === u.role)?.label}</Badge>
+                  <button onClick={() => startEdit(u)} title="Edit" style={{ color: "var(--c-text-dim)" }}><Pencil size={14} /></button>
+                  <button onClick={() => deleteUser(u.id)} title="Delete" style={{ color: "var(--c-danger)" }}><Trash2 size={14} /></button>
+                </div>
               </div>
             ))}
           </div>
+          {editingId && (
+            <p className="text-xs mb-2" style={{ color: "var(--c-amber)" }}>Editing {newUser.name}</p>
+          )}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <Input placeholder="Name" value={newUser.name} onChange={(e) => setNewUser({ ...newUser, name: e.target.value })} />
             <Input placeholder="Email (for notifications)" type="email" value={newUser.email} onChange={(e) => setNewUser({ ...newUser, email: e.target.value })} />
@@ -1033,7 +1070,12 @@ function SettingsView({ settings, setSettings, users, setUsers, currentUser, not
               {ROLES.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
             </Select>
           </div>
-          <Button className="mt-3" size="sm" onClick={addUser}><Plus size={14} /> Add member</Button>
+          <div className="flex gap-2 mt-3">
+            {editingId && <Button variant="ghost" size="sm" onClick={cancelEdit}>Cancel</Button>}
+            <Button size="sm" onClick={editingId ? saveEditedUser : addUser}>
+              {editingId ? (<><Pencil size={14} /> Save changes</>) : (<><Plus size={14} /> Add member</>)}
+            </Button>
+          </div>
         </div>
       )}
     </div>
