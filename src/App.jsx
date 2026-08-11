@@ -3,12 +3,13 @@ import {
   LayoutDashboard, Trello, ListChecks, CalendarDays,
   Settings as SettingsIcon, LogOut, Plus, X, Search, ChevronLeft, ChevronRight,
   Check, XCircle, Link2, Users, Clock, AlertCircle, CheckCircle2, Circle,
-  ArrowUpDown, Trash2, Pencil, Wifi, WifiOff, ShieldCheck, Loader2, Menu
+  ArrowUpDown, Trash2, Pencil, Wifi, WifiOff, ShieldCheck, Loader2, Menu, Download
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   Cell, CartesianGrid
 } from "recharts";
+import * as XLSX from "xlsx";
 
 /* ---------------------------------------------------------------------- */
 /* Constants                                                              */
@@ -78,6 +79,22 @@ function isOverdue(task) {
   if (!task.dueDate || task.status === "done") return false;
   const today = new Date(); today.setHours(0, 0, 0, 0);
   return new Date(task.dueDate + "T00:00:00") < today;
+}
+
+function slaInfo(task) {
+  if (task.supportType !== "Test Report" || !task.createdAt || task.status === "done" || task.status === "pending") return null;
+  const daysElapsed = Math.floor((new Date() - new Date(task.createdAt)) / 86400000);
+  const level = daysElapsed > 10 ? "overdue" : daysElapsed >= 3 ? "warning" : "ontrack";
+  return { daysElapsed, level };
+}
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 }
 
 /* ---------------------------------------------------------------------- */
@@ -381,7 +398,7 @@ function SpecGroup({ label, prefix, form, set }) {
   );
 }
 
-function TaskModal({ task, users, currentUser, onClose, onSave, onDelete }) {
+function TaskModal({ task, users, currentUser, settings, onClose, onSave, onDelete, onAddComment }) {
   const [form, setForm] = useState(
     task || {
       title: "", description: "", project: "", status: "backlog", priority: "medium", assignee: "", dueDate: "",
@@ -392,13 +409,53 @@ function TaskModal({ task, users, currentUser, onClose, onSave, onDelete }) {
       lensModel: "", lensSpec: "", lensOthers: "",
       lightModel: "", lightSpec: "", lightOthers: "",
       spaceMin: "", spaceMax: "", cameraWD: "", lensWD: "", lightWD: "", lightDimension: "",
+      attachments: [], comments: [],
     }
   );
   const [showTech, setShowTech] = useState(false);
   const [pendingDone, setPendingDone] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [commentText, setCommentText] = useState("");
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const canAssign = currentUser.role === "lead" || currentUser.role === "admin";
   const needsApproval = !task?.id && currentUser.role === "sales";
+  const sheetsConnected = settings.useSheets && !!settings.sheetsUrl;
+
+  const handleFileUpload = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    setUploading(true);
+    for (const file of files) {
+      try {
+        const dataUrl = await fileToDataUrl(file);
+        const res = await fetch(settings.sheetsUrl, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify({ action: "uploadFile", name: file.name, mimeType: file.type, data: dataUrl.split(",")[1] }),
+        });
+        const json = await res.json();
+        if (json.url) {
+          setForm((f) => ({ ...f, attachments: [...(f.attachments || []), { name: file.name, url: json.url }] }));
+        }
+      } catch (err) { /* one file failing shouldn't block the others */ }
+    }
+    setUploading(false);
+    e.target.value = "";
+  };
+
+  const removeAttachment = (idx) => {
+    setForm((f) => ({ ...f, attachments: f.attachments.filter((_, i) => i !== idx) }));
+  };
+
+  const postComment = () => {
+    if (!commentText.trim() || !task?.id) return;
+    const updated = [...(form.comments || []), {
+      id: uid(), author: currentUser.name, text: commentText.trim(), createdAt: new Date().toISOString(),
+    }];
+    set("comments", updated);
+    onAddComment(task.id, updated);
+    setCommentText("");
+  };
 
   const toggleProduct = (item) => {
     setForm((f) => ({
@@ -549,7 +606,55 @@ function TaskModal({ task, users, currentUser, onClose, onSave, onDelete }) {
         </div>
       )}
 
-      <div className="flex items-center justify-between mt-2">
+      <Field label="Attachments">
+        {sheetsConnected ? (
+          <>
+            <input type="file" multiple onChange={handleFileUpload} disabled={uploading}
+              className="text-xs w-full" style={{ color: "var(--c-text-dim)" }} />
+            {uploading && <p className="text-xs mt-1" style={{ color: "var(--c-text-dim)" }}>Uploading...</p>}
+            {(form.attachments || []).length > 0 && (
+              <div className="flex flex-wrap gap-2 mt-2">
+                {form.attachments.map((a, i) => (
+                  <div key={i} className="flex items-center gap-1.5 text-xs pl-2.5 pr-1.5 py-1 rounded-md"
+                    style={{ background: "var(--c-surface-2)", border: "1px solid var(--c-border)" }}>
+                    <a href={a.url} target="_blank" rel="noreferrer" style={{ color: "var(--c-info)" }}>{a.name}</a>
+                    <button onClick={() => removeAttachment(i)} style={{ color: "var(--c-text-dim)" }}><X size={12} /></button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        ) : (
+          <p className="text-xs" style={{ color: "var(--c-text-dim)" }}>Connect Google Sheets in Settings to enable file attachments.</p>
+        )}
+      </Field>
+
+      {task?.id && (
+        <div className="mt-2 pt-3" style={{ borderTop: "1px solid var(--c-border)" }}>
+          <div className="text-xs font-semibold mb-2" style={{ color: "var(--c-text-dim)" }}>Comments</div>
+          <div className="space-y-2 mb-2" style={{ maxHeight: 160, overflowY: "auto" }}>
+            {(form.comments || []).length === 0 && (
+              <p className="text-xs" style={{ color: "var(--c-text-dim)" }}>No comments yet.</p>
+            )}
+            {(form.comments || []).map((cm) => (
+              <div key={cm.id} className="text-xs p-2 rounded-md" style={{ background: "var(--c-surface-2)" }}>
+                <div className="flex items-center justify-between mb-0.5">
+                  <span className="font-medium">{cm.author}</span>
+                  <span style={{ color: "var(--c-text-dim)" }}>{fmtDate(cm.createdAt ? cm.createdAt.slice(0, 10) : "")}</span>
+                </div>
+                <div>{cm.text}</div>
+              </div>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <Input value={commentText} onChange={(e) => setCommentText(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && postComment()} placeholder="Write a comment..." />
+            <Button size="sm" onClick={postComment}>Post</Button>
+          </div>
+        </div>
+      )}
+
+      <div className="flex items-center justify-between mt-4">
         <div>
           {task?.id && (
             <Button variant="danger" size="sm" onClick={() => onDelete(task.id)}><Trash2 size={14} /> Delete</Button>
@@ -622,6 +727,7 @@ function DashboardView({ tasks }) {
 function TaskCard({ task, onDragStart, onClick, canDecide, onApprove, onReject }) {
   const pr = PRIORITIES.find((p) => p.key === task.priority);
   const overdue = isOverdue(task);
+  const sla = slaInfo(task);
   const [confirmingReject, setConfirmingReject] = useState(false);
   const isPending = task.status === "pending";
   return (
@@ -635,6 +741,13 @@ function TaskCard({ task, onDragStart, onClick, canDecide, onApprove, onReject }
         </div>
         <div className="text-sm font-medium mb-1.5">{task.title}</div>
         {task.project && <div className="text-xs mb-1.5" style={{ color: "var(--c-text-dim)" }}>{task.project}</div>}
+        {sla && (
+          <div className="mb-1.5">
+            <Badge color={sla.level === "overdue" ? "var(--c-danger)" : sla.level === "warning" ? "var(--c-amber)" : "var(--c-info)"}>
+              Day {sla.daysElapsed} / 3-10 (Test report)
+            </Badge>
+          </div>
+        )}
         <div className="flex items-center justify-between text-xs" style={{ color: overdue ? "var(--c-danger)" : "var(--c-text-dim)" }}>
           <span>{task.assignee || "Unassigned"}</span>
           <span>{fmtDate(task.dueDate)}</span>
@@ -704,12 +817,13 @@ function BoardView({ tasks, onMove, onOpen, onNew, canDecide, onApprove, onRejec
 /* Task List                                                              */
 /* ---------------------------------------------------------------------- */
 
-function TaskListView({ tasks, onOpen, onNew }) {
+function TaskListView({ tasks, onOpen, onNew, currentUser }) {
   const [search, setSearch] = useState("");
   const [statusF, setStatusF] = useState("");
   const [prF, setPrF] = useState("");
   const [sortKey, setSortKey] = useState("dueDate");
   const [sortDir, setSortDir] = useState(1);
+  const canExport = ["lead", "admin"].includes(currentUser.role);
 
   const filtered = useMemo(() => {
     let list = tasks.filter((t) =>
@@ -723,6 +837,24 @@ function TaskListView({ tasks, onOpen, onNew }) {
     });
     return list;
   }, [tasks, search, statusF, prF, sortKey, sortDir]);
+
+  const exportToExcel = () => {
+    const rows = filtered.map((t) => ({
+      ID: t.ticket,
+      Title: t.title,
+      Status: STATUSES.find((s) => s.key === t.status)?.label || t.status,
+      Priority: PRIORITIES.find((p) => p.key === t.priority)?.label || t.priority,
+      Assignee: t.assignee || "Unassigned",
+      "Due date": t.dueDate || "",
+      Project: t.project || "",
+      "Support type": t.supportType || "",
+      Products: (t.products || []).join(", "),
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Tasks");
+    XLSX.writeFile(wb, "gateflow-tasks.xlsx");
+  };
 
   const toggleSort = (k) => { if (sortKey === k) setSortDir((d) => -d); else { setSortKey(k); setSortDir(1); } };
   const Th = ({ k, children }) => (
@@ -746,6 +878,7 @@ function TaskListView({ tasks, onOpen, onNew }) {
           <option value="">All priorities</option>
           {PRIORITIES.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
         </Select>
+        {canExport && <Button variant="subtle" onClick={exportToExcel}><Download size={15} /> Export</Button>}
         <Button onClick={onNew}><Plus size={15} /> New task</Button>
       </div>
 
@@ -1106,6 +1239,9 @@ export default function App() {
     updateTasks(tasks.filter((t) => t.id !== id));
     notify("Request rejected", "info");
   };
+  const addComment = (taskId, comments) => {
+    updateTasks(tasks.map((t) => (t.id === taskId ? { ...t, comments } : t)));
+  };
 
   const pendingCount = tasks.filter((t) => t.status === "pending").length;
   const canDecide = ["lead", "admin"].includes(currentUser?.role);
@@ -1139,7 +1275,7 @@ export default function App() {
             <BoardView tasks={tasks} onMove={moveTask} onOpen={(t) => setTaskModal({ task: t })} onNew={() => setTaskModal({})}
               canDecide={canDecide} onApprove={approveTask} onReject={rejectTask} />
           )}
-          {page === "tasks" && <TaskListView tasks={tasks} onOpen={(t) => setTaskModal({ task: t })} onNew={() => setTaskModal({})} />}
+          {page === "tasks" && <TaskListView tasks={tasks} onOpen={(t) => setTaskModal({ task: t })} onNew={() => setTaskModal({})} currentUser={currentUser} />}
           {page === "calendar" && <CalendarView tasks={tasks} users={users} onOpen={(t) => setTaskModal({ task: t })} />}
           {page === "settings" && (
             <SettingsView settings={settings} setSettings={setSettings} users={users} setUsers={updateUsers} currentUser={currentUser} notify={notify} />
@@ -1148,7 +1284,7 @@ export default function App() {
       </div>
 
       {taskModal !== null && (
-        <TaskModal task={taskModal.task} users={users} currentUser={currentUser} onClose={() => setTaskModal(null)} onSave={saveTask} onDelete={deleteTask} />
+        <TaskModal task={taskModal.task} users={users} currentUser={currentUser} settings={settings} onClose={() => setTaskModal(null)} onSave={saveTask} onDelete={deleteTask} onAddComment={addComment} />
       )}
       <Toast toast={toast} />
     </div>
