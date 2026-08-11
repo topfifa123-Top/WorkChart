@@ -16,6 +16,7 @@ import {
 
 const STORAGE_SHARED = true;
 const APP_PREFIX = "gateflow";
+const SESSION_IDLE_MS = 60 * 60 * 1000; // auto sign-out after 1 hour of no activity
 // Baked-in default: every device connects to the team's shared Google Sheet
 // automatically, unless that browser has explicitly saved its own settings.
 const DEFAULT_SETTINGS = { useSheets: true, sheetsUrl: "https://script.google.com/macros/s/AKfycbyJFsukvheoP5_XDyfIdB2kJHA4N529djz6IOceLDtBjszC4K2Eg5UeyxgOi21daoR9/exec" };
@@ -790,8 +791,9 @@ function TaskListView({ tasks, onOpen, onNew }) {
 /* Calendar                                                               */
 /* ---------------------------------------------------------------------- */
 
-function CalendarView({ tasks, onOpen }) {
+function CalendarView({ tasks, users, onOpen }) {
   const [cursor, setCursor] = useState(() => { const d = new Date(); d.setDate(1); return d; });
+  const [userFilter, setUserFilter] = useState("");
   const year = cursor.getFullYear(), month = cursor.getMonth();
   const firstDay = new Date(year, month, 1);
   const startOffset = firstDay.getDay();
@@ -801,20 +803,28 @@ function CalendarView({ tasks, onOpen }) {
   for (let d = 1; d <= daysInMonth; d++) cells.push(d);
   while (cells.length % 7 !== 0) cells.push(null);
 
+  const filteredTasks = useMemo(() => {
+    return userFilter ? tasks.filter((t) => t.assignee === userFilter) : tasks;
+  }, [tasks, userFilter]);
+
   const tasksByDay = useMemo(() => {
     const map = {};
-    tasks.forEach((t) => { if (t.dueDate) (map[t.dueDate] = map[t.dueDate] || []).push(t); });
+    filteredTasks.forEach((t) => { if (t.dueDate) (map[t.dueDate] = map[t.dueDate] || []).push(t); });
     return map;
-  }, [tasks]);
+  }, [filteredTasks]);
 
   const monthLabel = cursor.toLocaleDateString("en-US", { month: "long", year: "numeric" });
   const weekdays = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 
   return (
     <div className="p-5 md:p-8">
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
         <h2 className="font-semibold" style={{ fontFamily: "var(--f-display)", fontSize: 18 }}>{monthLabel}</h2>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <Select style={{ width: 170 }} value={userFilter} onChange={(e) => setUserFilter(e.target.value)}>
+            <option value="">All users</option>
+            {users.map((u) => <option key={u.id} value={u.name}>{u.name}</option>)}
+          </Select>
           <Button variant="ghost" size="sm" onClick={() => setCursor(new Date(year, month - 1, 1))}><ChevronLeft size={15} /></Button>
           <Button variant="ghost" size="sm" onClick={() => setCursor(new Date())}>Today</Button>
           <Button variant="ghost" size="sm" onClick={() => setCursor(new Date(year, month + 1, 1))}><ChevronRight size={15} /></Button>
@@ -1046,6 +1056,26 @@ export default function App() {
     saveSession(null);
   };
 
+  useEffect(() => {
+    if (!currentUser) return;
+    let timer;
+    const resetTimer = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        setCurrentUser(null);
+        saveSession(null);
+        notify("Signed out after 1 hour of inactivity", "info");
+      }, SESSION_IDLE_MS);
+    };
+    const events = ["mousemove", "mousedown", "keydown", "touchstart", "scroll"];
+    events.forEach((ev) => window.addEventListener(ev, resetTimer));
+    resetTimer();
+    return () => {
+      clearTimeout(timer);
+      events.forEach((ev) => window.removeEventListener(ev, resetTimer));
+    };
+  }, [currentUser, notify]);
+
   const persist = async (key, data) => {
     try { await saveCollection(key, data, settings); }
     catch { notify("Failed to save data", "error"); }
@@ -1110,7 +1140,7 @@ export default function App() {
               canDecide={canDecide} onApprove={approveTask} onReject={rejectTask} />
           )}
           {page === "tasks" && <TaskListView tasks={tasks} onOpen={(t) => setTaskModal({ task: t })} onNew={() => setTaskModal({})} />}
-          {page === "calendar" && <CalendarView tasks={tasks} onOpen={(t) => setTaskModal({ task: t })} />}
+          {page === "calendar" && <CalendarView tasks={tasks} users={users} onOpen={(t) => setTaskModal({ task: t })} />}
           {page === "settings" && (
             <SettingsView settings={settings} setSettings={setSettings} users={users} setUsers={updateUsers} currentUser={currentUser} notify={notify} />
           )}
