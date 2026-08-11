@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import {
-  LayoutDashboard, Trello, ListChecks, CalendarDays, ClipboardCheck,
+  LayoutDashboard, Trello, ListChecks, CalendarDays,
   Settings as SettingsIcon, LogOut, Plus, X, Search, ChevronLeft, ChevronRight,
   Check, XCircle, Link2, Users, Clock, AlertCircle, CheckCircle2, Circle,
   ArrowUpDown, Trash2, Pencil, Wifi, WifiOff, ShieldCheck, Loader2, Menu
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, CartesianGrid
+  Cell, CartesianGrid
 } from "recharts";
 
 /* ---------------------------------------------------------------------- */
@@ -18,6 +18,7 @@ const STORAGE_SHARED = true;
 const APP_PREFIX = "gateflow";
 
 const STATUSES = [
+  { key: "pending", label: "Pending Approval", color: "var(--c-rose)" },
   { key: "backlog", label: "Not Started", color: "var(--c-text-dim)" },
   { key: "todo", label: "To Do", color: "var(--c-info)" },
   { key: "inprogress", label: "In Progress", color: "var(--c-amber)" },
@@ -261,10 +262,9 @@ function LoginScreen({ users, onLogin, notify }) {
 function Sidebar({ page, setPage, pendingCount, connected, mobileOpen, onClose }) {
   const items = [
     { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-    { key: "board", label: "Kanban Board", icon: Trello },
+    { key: "board", label: "Kanban Board", icon: Trello, badge: pendingCount },
     { key: "tasks", label: "Task List", icon: ListChecks },
     { key: "calendar", label: "Calendar", icon: CalendarDays },
-    { key: "approvals", label: "Approvals", icon: ClipboardCheck, badge: pendingCount },
     { key: "settings", label: "Settings", icon: SettingsIcon },
   ];
   return (
@@ -343,23 +343,63 @@ function Topbar({ title, user, onLogout, onMenuClick }) {
 /* Task Modal                                                             */
 /* ---------------------------------------------------------------------- */
 
+function SpecGroup({ label, prefix, form, set }) {
+  return (
+    <div className="mb-3">
+      <div className="text-xs font-medium mb-1" style={{ color: "var(--c-text-dim)" }}>{label}</div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        <Input placeholder="Model" value={form[prefix + "Model"] || ""} onChange={(e) => set(prefix + "Model", e.target.value)} />
+        <Input placeholder="Specification" value={form[prefix + "Spec"] || ""} onChange={(e) => set(prefix + "Spec", e.target.value)} />
+        <Input placeholder="Others" value={form[prefix + "Others"] || ""} onChange={(e) => set(prefix + "Others", e.target.value)} />
+      </div>
+    </div>
+  );
+}
+
 function TaskModal({ task, users, currentUser, onClose, onSave, onDelete }) {
   const [form, setForm] = useState(
-    task || { title: "", description: "", project: "", status: "backlog", priority: "medium", assignee: "", dueDate: "" }
+    task || {
+      title: "", description: "", project: "", status: "backlog", priority: "medium", assignee: "", dueDate: "",
+      contactPerson: "", contactNumber: "", supportType: "", products: "",
+      objName: "", objSize: "", objType: "", objColour: "", objMaterial: "", objReturn: "",
+      mainPurpose: "", movingSpeed: "", fov: "", accuracy: "", background: "",
+      cameraModel: "", cameraSpec: "", cameraOthers: "",
+      lensModel: "", lensSpec: "", lensOthers: "",
+      lightModel: "", lightSpec: "", lightOthers: "",
+      spaceMin: "", spaceMax: "", cameraWD: "", lensWD: "", lightWD: "", lightDimension: "",
+    }
   );
+  const [showTech, setShowTech] = useState(false);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const canAssign = currentUser.role === "lead" || currentUser.role === "admin";
+  const needsApproval = !task?.id && currentUser.role === "sales";
+
+  const submit = () => {
+    if (!form.title.trim()) return;
+    onSave(needsApproval ? { ...form, status: "pending" } : form);
+  };
+
   return (
     <Modal title={task?.id ? `Edit task ${task.ticket || ""}` : "New task"} onClose={onClose} wide>
       <Field label="Task title"><Input value={form.title} onChange={(e) => set("title", e.target.value)} placeholder="e.g. Set up API for client X" /></Field>
       <Field label="Description"><TextArea value={form.description} onChange={(e) => set("description", e.target.value)} /></Field>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="Project"><Input value={form.project} onChange={(e) => set("project", e.target.value)} placeholder="Project / client name" /></Field>
-        <Field label="Status">
-          <Select value={form.status} onChange={(e) => set("status", e.target.value)}>
-            {STATUSES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
-          </Select>
-        </Field>
+        <Field label="Project / Company"><Input value={form.project} onChange={(e) => set("project", e.target.value)} placeholder="Project / client / company name" /></Field>
+        <Field label="Products"><Input value={form.products} onChange={(e) => set("products", e.target.value)} placeholder="e.g. Machine vision camera system" /></Field>
+        <Field label="Contact Person"><Input value={form.contactPerson} onChange={(e) => set("contactPerson", e.target.value)} /></Field>
+        <Field label="Contact Number"><Input value={form.contactNumber} onChange={(e) => set("contactNumber", e.target.value)} /></Field>
+        <Field label="Support Type"><Input value={form.supportType} onChange={(e) => set("supportType", e.target.value)} placeholder="e.g. On-site testing" /></Field>
+        {needsApproval ? (
+          <Field label="Status">
+            <div style={{ ...inputStyle, opacity: 0.7 }}>Pending Approval (sent to Technical Leader)</div>
+          </Field>
+        ) : (
+          <Field label="Status">
+            <Select value={form.status} onChange={(e) => set("status", e.target.value)}>
+              {STATUSES.filter((s) => s.key !== "pending").map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+            </Select>
+          </Field>
+        )}
         <Field label="Priority">
           <Select value={form.priority} onChange={(e) => set("priority", e.target.value)}>
             {PRIORITIES.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
@@ -381,77 +421,8 @@ function TaskModal({ task, users, currentUser, onClose, onSave, onDelete }) {
           </Field>
         )}
       </div>
-      <div className="flex items-center justify-between mt-4">
-        <div>
-          {task?.id && (
-            <Button variant="danger" size="sm" onClick={() => onDelete(task.id)}><Trash2 size={14} /> Delete</Button>
-          )}
-        </div>
-        <div className="flex gap-2">
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button onClick={() => form.title.trim() && onSave(form)}>Save</Button>
-        </div>
-      </div>
-    </Modal>
-  );
-}
 
-/* ---------------------------------------------------------------------- */
-/* Approval Request Modal                                                 */
-/* ---------------------------------------------------------------------- */
-
-function SpecGroup({ label, prefix, form, set }) {
-  return (
-    <div className="mb-3">
-      <div className="text-xs font-medium mb-1" style={{ color: "var(--c-text-dim)" }}>{label}</div>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-        <Input placeholder="Model" value={form[prefix + "Model"] || ""} onChange={(e) => set(prefix + "Model", e.target.value)} />
-        <Input placeholder="Specification" value={form[prefix + "Spec"] || ""} onChange={(e) => set(prefix + "Spec", e.target.value)} />
-        <Input placeholder="Others" value={form[prefix + "Others"] || ""} onChange={(e) => set(prefix + "Others", e.target.value)} />
-      </div>
-    </div>
-  );
-}
-
-function ApprovalModal({ onClose, onSave, currentUser }) {
-  const [form, setForm] = useState({
-    project: "", contactPerson: "", contactNumber: "", supportType: "", products: "",
-    description: "", priority: "medium", dueDate: "",
-    objName: "", objSize: "", objType: "", objColour: "", objMaterial: "", objReturn: "",
-    mainPurpose: "", movingSpeed: "", fov: "", accuracy: "", background: "",
-    cameraModel: "", cameraSpec: "", cameraOthers: "",
-    lensModel: "", lensSpec: "", lensOthers: "",
-    lightModel: "", lightSpec: "", lightOthers: "",
-    spaceMin: "", spaceMax: "", cameraWD: "", lensWD: "", lightWD: "", lightDimension: "",
-  });
-  const [showTech, setShowTech] = useState(false);
-  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
-
-  const submit = () => {
-    const title = `${form.project || "Untitled"} — ${form.products || "Testing request"}`;
-    onSave({ ...form, title, requestedBy: currentUser.name });
-  };
-
-  return (
-    <Modal title="New Testing Request" onClose={onClose} wide>
-      <Field label="Company Name"><Input value={form.project} onChange={(e) => set("project", e.target.value)} placeholder="Client company name" /></Field>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="Contact Person"><Input value={form.contactPerson} onChange={(e) => set("contactPerson", e.target.value)} /></Field>
-        <Field label="Contact Number"><Input value={form.contactNumber} onChange={(e) => set("contactNumber", e.target.value)} /></Field>
-        <Field label="Support Type"><Input value={form.supportType} onChange={(e) => set("supportType", e.target.value)} placeholder="e.g. On-site testing" /></Field>
-        <Field label="Products"><Input value={form.products} onChange={(e) => set("products", e.target.value)} placeholder="e.g. Machine vision camera system" /></Field>
-      </div>
-      <Field label="Problems / Requirements"><TextArea value={form.description} onChange={(e) => set("description", e.target.value)} /></Field>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="Priority">
-          <Select value={form.priority} onChange={(e) => set("priority", e.target.value)}>
-            {PRIORITIES.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
-          </Select>
-        </Field>
-        <Field label="Deadline"><Input type="date" value={form.dueDate} onChange={(e) => set("dueDate", e.target.value)} /></Field>
-      </div>
-
-      <Button variant="ghost" size="sm" className="w-full justify-center mb-3" onClick={() => setShowTech((s) => !s)}>
+      <Button variant="ghost" size="sm" className="w-full justify-center mb-3 mt-1" onClick={() => setShowTech((s) => !s)}>
         {showTech ? "\u2212 Hide technical details" : "+ Add technical details (optional)"}
       </Button>
 
@@ -497,9 +468,16 @@ function ApprovalModal({ onClose, onSave, currentUser }) {
         </div>
       )}
 
-      <div className="flex justify-end gap-2 mt-2">
-        <Button variant="ghost" onClick={onClose}>Cancel</Button>
-        <Button disabled={!form.project.trim() || !form.products.trim()} onClick={submit}>Submit request</Button>
+      <div className="flex items-center justify-between mt-2">
+        <div>
+          {task?.id && (
+            <Button variant="danger" size="sm" onClick={() => onDelete(task.id)}><Trash2 size={14} /> Delete</Button>
+          )}
+        </div>
+        <div className="flex gap-2">
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button onClick={submit}>{needsApproval ? "Submit for approval" : "Save"}</Button>
+        </div>
       </div>
     </Modal>
   );
@@ -523,76 +501,34 @@ function StatCard({ icon: Icon, label, value, color }) {
   );
 }
 
-function DashboardView({ tasks, approvals }) {
+function DashboardView({ tasks }) {
   const statusData = STATUSES.map((s) => ({ name: s.label, value: tasks.filter((t) => t.status === s.key).length, color: s.color }));
-  const pending = approvals.filter((a) => a.status === "pending").length;
-  const approved = approvals.filter((a) => a.status === "approved").length;
-  const rejected = approvals.filter((a) => a.status === "rejected").length;
+  const pending = tasks.filter((t) => t.status === "pending").length;
   const overdue = tasks.filter(isOverdue).length;
-  const pieData = [
-    { name: "Pending", value: pending, color: "var(--c-amber)" },
-    { name: "Approved", value: approved, color: "var(--c-accent)" },
-    { name: "Rejected", value: rejected, color: "var(--c-danger)" },
-  ].filter((d) => d.value > 0);
-  const recent = [...approvals].sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || "")).slice(0, 5);
-
-  const COLORS = ["var(--c-text-dim)", "var(--c-info)", "var(--c-amber)", "var(--c-purple)", "var(--c-accent)"];
+  const COLORS = STATUSES.map((s) => s.color);
 
   return (
     <div className="p-5 md:p-8 space-y-6">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard icon={ListChecks} label="Total tasks" value={tasks.length} color="var(--c-info)" />
-        <StatCard icon={Clock} label="Pending" value={pending} color="var(--c-amber)" />
+        <StatCard icon={Clock} label="Pending Approval" value={pending} color="var(--c-rose)" />
         <StatCard icon={CheckCircle2} label="Completed" value={tasks.filter((t) => t.status === "done").length} color="var(--c-accent)" />
         <StatCard icon={AlertCircle} label="Overdue" value={overdue} color="var(--c-danger)" />
       </div>
 
-      <div className="grid md:grid-cols-2 gap-5">
-        <div className="rounded-xl p-5" style={{ background: "var(--c-surface)", border: "1px solid var(--c-border)" }}>
-          <h3 className="text-sm font-semibold mb-4">Tasks by status</h3>
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={statusData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--c-border)" />
-              <XAxis dataKey="name" tick={{ fill: "var(--c-text-dim)", fontSize: 11 }} axisLine={{ stroke: "var(--c-border)" }} />
-              <YAxis allowDecimals={false} tick={{ fill: "var(--c-text-dim)", fontSize: 11 }} axisLine={{ stroke: "var(--c-border)" }} />
-              <Tooltip contentStyle={{ background: "var(--c-surface-2)", border: "1px solid var(--c-border)", borderRadius: 8, fontSize: 12 }} />
-              <Bar dataKey="value" radius={[6, 6, 0, 0]}>
-                {statusData.map((d, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-        <div className="rounded-xl p-5" style={{ background: "var(--c-surface)", border: "1px solid var(--c-border)" }}>
-          <h3 className="text-sm font-semibold mb-4">Approvals</h3>
-          {pieData.length ? (
-            <ResponsiveContainer width="100%" height={220}>
-              <PieChart>
-                <Pie data={pieData} dataKey="value" nameKey="name" innerRadius={50} outerRadius={80} paddingAngle={3}>
-                  {pieData.map((d, i) => <Cell key={i} fill={d.color} />)}
-                </Pie>
-                <Tooltip contentStyle={{ background: "var(--c-surface-2)", border: "1px solid var(--c-border)", borderRadius: 8, fontSize: 12 }} />
-              </PieChart>
-            </ResponsiveContainer>
-          ) : <p className="text-sm py-16 text-center" style={{ color: "var(--c-text-dim)" }}>No requests yet</p>}
-        </div>
-      </div>
-
       <div className="rounded-xl p-5" style={{ background: "var(--c-surface)", border: "1px solid var(--c-border)" }}>
-        <h3 className="text-sm font-semibold mb-3">Recent requests</h3>
-        <div className="space-y-2">
-          {recent.length === 0 && <p className="text-sm" style={{ color: "var(--c-text-dim)" }}>No requests yet</p>}
-          {recent.map((a) => (
-            <div key={a.id} className="flex items-center justify-between text-sm py-2" style={{ borderBottom: "1px solid var(--c-border)" }}>
-              <div className="flex items-center gap-2 min-w-0">
-                <Ticket id={a.ticket} />
-                <span className="truncate">{a.title}</span>
-              </div>
-              <Badge color={a.status === "pending" ? "var(--c-amber)" : a.status === "approved" ? "var(--c-accent)" : "var(--c-danger)"}>
-                {a.status === "pending" ? "Pending" : a.status === "approved" ? "Approved" : "Rejected"}
-              </Badge>
-            </div>
-          ))}
-        </div>
+        <h3 className="text-sm font-semibold mb-4">Tasks by status</h3>
+        <ResponsiveContainer width="100%" height={260}>
+          <BarChart data={statusData}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--c-border)" />
+            <XAxis dataKey="name" tick={{ fill: "var(--c-text-dim)", fontSize: 11 }} axisLine={{ stroke: "var(--c-border)" }} />
+            <YAxis allowDecimals={false} tick={{ fill: "var(--c-text-dim)", fontSize: 11 }} axisLine={{ stroke: "var(--c-border)" }} />
+            <Tooltip contentStyle={{ background: "var(--c-surface-2)", border: "1px solid var(--c-border)", borderRadius: 8, fontSize: 12 }} />
+            <Bar dataKey="value" radius={[6, 6, 0, 0]}>
+              {statusData.map((d, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
       </div>
     </div>
   );
@@ -602,28 +538,47 @@ function DashboardView({ tasks, approvals }) {
 /* Kanban Board                                                           */
 /* ---------------------------------------------------------------------- */
 
-function TaskCard({ task, onDragStart, onClick }) {
+function TaskCard({ task, onDragStart, onClick, canDecide, onApprove, onReject }) {
   const pr = PRIORITIES.find((p) => p.key === task.priority);
   const overdue = isOverdue(task);
+  const [confirmingReject, setConfirmingReject] = useState(false);
+  const isPending = task.status === "pending";
   return (
-    <div draggable onDragStart={(e) => onDragStart(e, task.id)} onClick={() => onClick(task)}
-      className="rounded-lg p-3 mb-2 cursor-pointer hover:opacity-90"
+    <div draggable onDragStart={(e) => onDragStart(e, task.id)}
+      className="rounded-lg p-3 mb-2 hover:opacity-90"
       style={{ background: "var(--c-surface-2)", border: "1px solid var(--c-border)" }}>
-      <div className="flex items-center justify-between mb-1.5">
-        <Ticket id={task.ticket} />
-        <Badge color={pr?.color}>{pr?.label}</Badge>
+      <div onClick={() => onClick(task)} className="cursor-pointer">
+        <div className="flex items-center justify-between mb-1.5">
+          <Ticket id={task.ticket} />
+          <Badge color={pr?.color}>{pr?.label}</Badge>
+        </div>
+        <div className="text-sm font-medium mb-1.5">{task.title}</div>
+        {task.project && <div className="text-xs mb-1.5" style={{ color: "var(--c-text-dim)" }}>{task.project}</div>}
+        <div className="flex items-center justify-between text-xs" style={{ color: overdue ? "var(--c-danger)" : "var(--c-text-dim)" }}>
+          <span>{task.assignee || "Unassigned"}</span>
+          <span>{fmtDate(task.dueDate)}</span>
+        </div>
       </div>
-      <div className="text-sm font-medium mb-1.5">{task.title}</div>
-      {task.project && <div className="text-xs mb-1.5" style={{ color: "var(--c-text-dim)" }}>{task.project}</div>}
-      <div className="flex items-center justify-between text-xs" style={{ color: overdue ? "var(--c-danger)" : "var(--c-text-dim)" }}>
-        <span>{task.assignee || "Unassigned"}</span>
-        <span>{fmtDate(task.dueDate)}</span>
-      </div>
+      {isPending && canDecide && (
+        <div className="flex gap-1.5 mt-2 pt-2" style={{ borderTop: "1px solid var(--c-border)" }} onClick={(e) => e.stopPropagation()}>
+          {confirmingReject ? (
+            <>
+              <Button size="sm" variant="danger" className="flex-1 justify-center" onClick={() => onReject(task.id)}>Confirm reject?</Button>
+              <Button size="sm" variant="ghost" onClick={() => setConfirmingReject(false)}><X size={13} /></Button>
+            </>
+          ) : (
+            <>
+              <Button size="sm" className="flex-1 justify-center" onClick={() => onApprove(task.id)}><Check size={13} /> Approve</Button>
+              <Button size="sm" variant="danger" className="flex-1 justify-center" onClick={() => setConfirmingReject(true)}><XCircle size={13} /> Reject</Button>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
-function BoardView({ tasks, onMove, onOpen, onNew }) {
+function BoardView({ tasks, onMove, onOpen, onNew, canDecide, onApprove, onReject }) {
   const [dragOver, setDragOver] = useState(null);
   const onDragStart = (e, id) => e.dataTransfer.setData("text/plain", id);
   const onDrop = (e, status) => {
@@ -654,7 +609,7 @@ function BoardView({ tasks, onMove, onOpen, onNew }) {
                 <span className="text-xs ml-auto" style={{ color: "var(--c-text-dim)" }}>{items.length}</span>
               </div>
               <div style={{ minHeight: 40 }}>
-                {items.map((t) => <TaskCard key={t.id} task={t} onDragStart={onDragStart} onClick={onOpen} />)}
+                {items.map((t) => <TaskCard key={t.id} task={t} onDragStart={onDragStart} onClick={onOpen} canDecide={canDecide} onApprove={onApprove} onReject={onReject} />)}
               </div>
             </div>
           );
@@ -825,132 +780,6 @@ function CalendarView({ tasks, onOpen }) {
 }
 
 /* ---------------------------------------------------------------------- */
-/* Approvals                                                              */
-/* ---------------------------------------------------------------------- */
-
-function ApprovalCard({ approval, canDecide, onDecide }) {
-  const [comment, setComment] = useState("");
-  const [acting, setActing] = useState(null);
-  const [showTech, setShowTech] = useState(false);
-  const statusColor = approval.status === "pending" ? "var(--c-amber)" : approval.status === "approved" ? "var(--c-accent)" : "var(--c-danger)";
-  const p = PRIORITIES.find((x) => x.key === approval.priority);
-
-  const techFields = [
-    ["Object", [approval.objName, approval.objSize, approval.objType, approval.objColour, approval.objMaterial].filter(Boolean).join(" / ")],
-    ["Return object?", approval.objReturn],
-    ["Main purpose", approval.mainPurpose],
-    ["Moving speed", approval.movingSpeed],
-    ["FOV", approval.fov],
-    ["Accuracy", approval.accuracy],
-    ["Background", approval.background],
-    ["Camera", [approval.cameraModel, approval.cameraSpec, approval.cameraOthers].filter(Boolean).join(" / ")],
-    ["Lens", [approval.lensModel, approval.lensSpec, approval.lensOthers].filter(Boolean).join(" / ")],
-    ["Light source", [approval.lightModel, approval.lightSpec, approval.lightOthers].filter(Boolean).join(" / ")],
-    ["Space min/max (mm)", [approval.spaceMin, approval.spaceMax].filter(Boolean).join(" - ")],
-    ["Camera WD", approval.cameraWD],
-    ["Lens WD", approval.lensWD],
-    ["Light source WD", approval.lightWD],
-    ["Light source dimension", approval.lightDimension],
-  ].filter(([, v]) => v);
-
-  return (
-    <div className="rounded-xl p-4" style={{ background: "var(--c-surface)", border: "1px solid var(--c-border)" }}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            <Ticket id={approval.ticket} />
-            <Badge color={p?.color}>{p?.label}</Badge>
-          </div>
-          <div className="font-medium">{approval.title}</div>
-          {approval.supportType && <div className="text-xs mt-0.5" style={{ color: "var(--c-text-dim)" }}>{approval.supportType}</div>}
-        </div>
-        <Badge color={statusColor}>
-          {approval.status === "pending" ? "Pending" : approval.status === "approved" ? "Approved" : "Rejected"}
-        </Badge>
-      </div>
-      {approval.description && <p className="text-sm mt-2" style={{ color: "var(--c-text-dim)" }}>{approval.description}</p>}
-      <div className="text-xs mt-3 space-y-1" style={{ color: "var(--c-text-dim)" }}>
-        {(approval.contactPerson || approval.contactNumber) && (
-          <div>Contact: {approval.contactPerson || "-"}{approval.contactNumber ? ` / ${approval.contactNumber}` : ""}</div>
-        )}
-        <div className="flex items-center gap-4">
-          <span>Requested by: {approval.requestedBy}</span>
-          {approval.dueDate && <span>Needed by: {fmtDate(approval.dueDate)}</span>}
-        </div>
-      </div>
-      {approval.leadComment && (
-        <div className="text-xs mt-2 px-2 py-1.5 rounded" style={{ background: "var(--c-surface-2)", color: "var(--c-text-dim)" }}>
-          Team lead's comment: {approval.leadComment}
-        </div>
-      )}
-      {techFields.length > 0 && (
-        <div className="mt-3">
-          <button onClick={() => setShowTech((s) => !s)} className="text-xs" style={{ color: "var(--c-info)" }}>
-            {showTech ? "\u2212 Hide technical details" : "+ View technical details"}
-          </button>
-          {showTech && (
-            <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-xs p-2 rounded" style={{ background: "var(--c-surface-2)" }}>
-              {techFields.map(([label, value]) => (
-                <div key={label}><span style={{ color: "var(--c-text-dim)" }}>{label}: </span>{value}</div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-      {canDecide && approval.status === "pending" && (
-        <div className="mt-3 pt-3" style={{ borderTop: "1px solid var(--c-border)" }}>
-          {acting ? (
-            <div>
-              <TextArea placeholder="Comment (optional for approve, required for reject)" value={comment} onChange={(e) => setComment(e.target.value)} />
-              <div className="flex justify-end gap-2 mt-2">
-                <Button variant="ghost" size="sm" onClick={() => { setActing(null); setComment(""); }}>Cancel</Button>
-                <Button size="sm" variant={acting === "reject" ? "danger" : "primary"}
-                  disabled={acting === "reject" && !comment.trim()}
-                  onClick={() => { onDecide(approval.id, acting, comment); setActing(null); setComment(""); }}>
-                  {acting === "approve" ? "Confirm approval" : "Confirm rejection"}
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <div className="flex gap-2">
-              <Button size="sm" onClick={() => setActing("approve")}><Check size={14} /> Approve</Button>
-              <Button size="sm" variant="danger" onClick={() => setActing("reject")}><XCircle size={14} /> Reject</Button>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ApprovalsView({ approvals, currentUser, onNew, onDecide }) {
-  const [tab, setTab] = useState("pending");
-  const canRequest = ["sales", "admin"].includes(currentUser.role);
-  const canDecide = ["lead", "admin"].includes(currentUser.role);
-  const filtered = approvals.filter((a) => a.status === tab).sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
-
-  return (
-    <div className="p-5 md:p-8">
-      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-        <div className="flex gap-1 p-1 rounded-lg" style={{ background: "var(--c-surface-2)" }}>
-          {[["pending", "Pending"], ["approved", "Approved"], ["rejected", "Rejected"]].map(([k, l]) => (
-            <button key={k} onClick={() => setTab(k)} className="px-3 py-1.5 rounded-md text-sm font-medium"
-              style={{ background: tab === k ? "var(--c-surface)" : "transparent", color: tab === k ? "var(--c-text)" : "var(--c-text-dim)" }}>
-              {l} ({approvals.filter((a) => a.status === k).length})
-            </button>
-          ))}
-        </div>
-        {canRequest && <Button onClick={onNew}><Plus size={15} /> New request</Button>}
-      </div>
-      <div className="grid md:grid-cols-2 gap-3">
-        {filtered.map((a) => <ApprovalCard key={a.id} approval={a} canDecide={canDecide} onDecide={onDecide} />)}
-        {filtered.length === 0 && <p className="text-sm col-span-2 py-10 text-center" style={{ color: "var(--c-text-dim)" }}>No items</p>}
-      </div>
-    </div>
-  );
-}
-
-/* ---------------------------------------------------------------------- */
 /* Settings                                                                */
 /* ---------------------------------------------------------------------- */
 
@@ -1091,13 +920,11 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [users, setUsers] = useState(DEFAULT_USERS);
   const [tasks, setTasks] = useState([]);
-  const [approvals, setApprovals] = useState([]);
   const [settings, setSettings] = useState({ useSheets: false, sheetsUrl: "" });
   const [page, setPage] = useState("dashboard");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [toast, setToast] = useState(null);
   const [taskModal, setTaskModal] = useState(null); // {} new, {task} edit, null closed
-  const [approvalModal, setApprovalModal] = useState(false);
 
   const notify = useCallback((msg, type = "success") => {
     setToast({ msg, type });
@@ -1109,12 +936,11 @@ export default function App() {
       const s = await loadSettings();
       setSettings(s);
       try {
-        const [u, t, a] = await Promise.all([
-          loadCollection("users", s), loadCollection("tasks", s), loadCollection("approvals", s),
+        const [u, t] = await Promise.all([
+          loadCollection("users", s), loadCollection("tasks", s),
         ]);
         setUsers(u.length ? u : DEFAULT_USERS);
         setTasks(t);
-        setApprovals(a);
         if (!u.length) await saveCollection("users", DEFAULT_USERS, s);
       } catch (e) {
         notify("Failed to load data from Google Sheets — using local data instead", "error");
@@ -1131,51 +957,36 @@ export default function App() {
 
   const updateUsers = (list) => { setUsers(list); persist("users", list); };
   const updateTasks = (list) => { setTasks(list); persist("tasks", list); };
-  const updateApprovals = (list) => { setApprovals(list); persist("approvals", list); };
 
   const saveTask = (form) => {
     if (form.id) {
       updateTasks(tasks.map((t) => (t.id === form.id ? { ...form } : t)));
+      notify("Task saved");
     } else {
       const ticket = nextTicket(tasks, "ticket", "OPT");
       updateTasks([...tasks, { ...form, id: uid(), ticket, createdBy: currentUser.name, createdAt: new Date().toISOString() }]);
+      notify(form.status === "pending" ? "Request submitted for approval" : "Task saved");
     }
     setTaskModal(null);
-    notify("Task saved");
   };
   const deleteTask = (id) => { updateTasks(tasks.filter((t) => t.id !== id)); setTaskModal(null); notify("Task deleted"); };
   const moveTask = (id, status) => updateTasks(tasks.map((t) => (t.id === id ? { ...t, status } : t)));
 
-  const saveApproval = (form) => {
-    const ticket = nextTicket(approvals, "ticket", "REQ");
-    updateApprovals([...approvals, { ...form, id: uid(), ticket, status: "pending", createdAt: new Date().toISOString() }]);
-    setApprovalModal(false);
-    notify("Approval request submitted");
+  const approveTask = (id) => {
+    updateTasks(tasks.map((t) => (t.id === id ? { ...t, status: "backlog" } : t)));
+    notify("Approved — moved to Not Started");
+  };
+  const rejectTask = (id) => {
+    updateTasks(tasks.filter((t) => t.id !== id));
+    notify("Request rejected", "info");
   };
 
-  const decideApproval = (id, decision, comment) => {
-    const approval = approvals.find((a) => a.id === id);
-    const status = decision === "approve" ? "approved" : "rejected";
-    updateApprovals(approvals.map((a) => (a.id === id ? { ...a, status, leadComment: comment } : a)));
-    if (decision === "approve") {
-      const ticket = nextTicket(tasks, "ticket", "OPT");
-      updateTasks([...tasks, {
-        ...approval,
-        id: uid(), ticket, status: "backlog", assignee: "",
-        sourceApprovalId: approval.id,
-        createdBy: approval.requestedBy, createdAt: new Date().toISOString(),
-      }]);
-      notify("Approved — new task created in Not Started");
-    } else {
-      notify("Request rejected", "info");
-    }
-  };
-
-  const pendingCount = approvals.filter((a) => a.status === "pending").length;
+  const pendingCount = tasks.filter((t) => t.status === "pending").length;
+  const canDecide = ["lead", "admin"].includes(currentUser?.role);
 
   const pageTitles = {
     dashboard: "Dashboard", board: "Kanban Board", tasks: "Task List",
-    calendar: "Calendar", approvals: "Approvals", settings: "Settings",
+    calendar: "Calendar", settings: "Settings",
   };
 
   if (!ready) {
@@ -1197,13 +1008,13 @@ export default function App() {
       <div className="flex-1 min-w-0 flex flex-col">
         <Topbar title={pageTitles[page]} user={currentUser} onLogout={() => setCurrentUser(null)} onMenuClick={() => setMobileNavOpen(true)} />
         <div className="flex-1 overflow-y-auto">
-          {page === "dashboard" && <DashboardView tasks={tasks} approvals={approvals} />}
-          {page === "board" && <BoardView tasks={tasks} onMove={moveTask} onOpen={(t) => setTaskModal({ task: t })} onNew={() => setTaskModal({})} />}
+          {page === "dashboard" && <DashboardView tasks={tasks} />}
+          {page === "board" && (
+            <BoardView tasks={tasks} onMove={moveTask} onOpen={(t) => setTaskModal({ task: t })} onNew={() => setTaskModal({})}
+              canDecide={canDecide} onApprove={approveTask} onReject={rejectTask} />
+          )}
           {page === "tasks" && <TaskListView tasks={tasks} onOpen={(t) => setTaskModal({ task: t })} onNew={() => setTaskModal({})} />}
           {page === "calendar" && <CalendarView tasks={tasks} onOpen={(t) => setTaskModal({ task: t })} />}
-          {page === "approvals" && (
-            <ApprovalsView approvals={approvals} currentUser={currentUser} onNew={() => setApprovalModal(true)} onDecide={decideApproval} />
-          )}
           {page === "settings" && (
             <SettingsView settings={settings} setSettings={setSettings} users={users} setUsers={updateUsers} currentUser={currentUser} notify={notify} />
           )}
@@ -1213,7 +1024,6 @@ export default function App() {
       {taskModal !== null && (
         <TaskModal task={taskModal.task} users={users} currentUser={currentUser} onClose={() => setTaskModal(null)} onSave={saveTask} onDelete={deleteTask} />
       )}
-      {approvalModal && <ApprovalModal onClose={() => setApprovalModal(false)} onSave={saveApproval} currentUser={currentUser} />}
       <Toast toast={toast} />
     </div>
   );
@@ -1235,6 +1045,7 @@ function GlobalStyle() {
         --c-danger: #F16565;
         --c-info: #5B8DEF;
         --c-purple: #A78BFA;
+        --c-rose: #F472B6;
         --f-display: 'Space Grotesk', sans-serif;
         --f-mono: 'JetBrains Mono', monospace;
       }
