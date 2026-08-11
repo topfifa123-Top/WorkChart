@@ -35,6 +35,13 @@ const PRIORITIES = [
   { key: "high", label: "High", color: "var(--c-danger)" },
 ];
 
+const PRODUCT_CATEGORIES = [
+  { group: "Software", items: ["Smart 3", "DeepVision 3"] },
+  { group: "Hardware", items: ["Smart Cameras", "Industrial Cameras", "Smart Code Readers", "3D Cameras", "Industrial Lenses", "Standard Light Source", "Light Source Controller", "Measurement Systems"] },
+];
+
+const SUPPORT_TYPES = ["Onsite", "Training", "Test Report", "Collect image"];
+
 const ROLES = [
   { key: "admin", label: "Admin" },
   { key: "sales", label: "Sales" },
@@ -76,9 +83,11 @@ function isOverdue(task) {
 /* Data layer — local shared storage, or Google Sheets bridge             */
 /* ---------------------------------------------------------------------- */
 
-// This build runs inside a Claude artifact, so it uses the Claude-only
-// window.storage API (shared=true) so every teammate viewing this artifact
-// sees the same data.
+// NOTE: this build runs as a real deployed website (not inside a Claude
+// artifact), so it uses the browser's own localStorage instead of the
+// Claude-only window.storage API. localStorage is per-browser/per-device —
+// each teammate's data stays on their own machine until Google Sheets sync
+// is turned on in Settings, at which point everyone reads/writes the same Sheet.
 
 async function loadCollection(key, settings) {
   if (settings.useSheets && settings.sheetsUrl) {
@@ -88,8 +97,8 @@ async function loadCollection(key, settings) {
     return Array.isArray(json.data) ? json.data : [];
   }
   try {
-    const r = await window.storage.get(`${APP_PREFIX}:${key}`, STORAGE_SHARED);
-    return r ? JSON.parse(r.value) : [];
+    const raw = localStorage.getItem(`${APP_PREFIX}:${key}`);
+    return raw ? JSON.parse(raw) : [];
   } catch {
     return [];
   }
@@ -105,19 +114,33 @@ async function saveCollection(key, data, settings) {
     if (!res.ok) throw new Error("Sheets save failed");
     return;
   }
-  await window.storage.set(`${APP_PREFIX}:${key}`, JSON.stringify(data), STORAGE_SHARED);
+  localStorage.setItem(`${APP_PREFIX}:${key}`, JSON.stringify(data));
 }
 
 async function loadSettings() {
   try {
-    const r = await window.storage.get(`${APP_PREFIX}:settings`, STORAGE_SHARED);
-    return r ? JSON.parse(r.value) : DEFAULT_SETTINGS;
+    const raw = localStorage.getItem(`${APP_PREFIX}:settings`);
+    return raw ? JSON.parse(raw) : DEFAULT_SETTINGS;
   } catch {
     return DEFAULT_SETTINGS;
   }
 }
 async function saveSettings(s) {
-  await window.storage.set(`${APP_PREFIX}:settings`, JSON.stringify(s), STORAGE_SHARED);
+  localStorage.setItem(`${APP_PREFIX}:settings`, JSON.stringify(s));
+}
+
+// Session: which user is currently logged in on this browser. Personal to
+// this device only — never shared, unlike the team data above.
+async function loadSession() {
+  try {
+    const raw = localStorage.getItem(`${APP_PREFIX}:session`);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+async function saveSession(userId) {
+  localStorage.setItem(`${APP_PREFIX}:session`, JSON.stringify(userId));
 }
 
 /* ---------------------------------------------------------------------- */
@@ -361,7 +384,7 @@ function TaskModal({ task, users, currentUser, onClose, onSave, onDelete }) {
   const [form, setForm] = useState(
     task || {
       title: "", description: "", project: "", status: "backlog", priority: "medium", assignee: "", dueDate: "",
-      contactPerson: "", contactNumber: "", supportType: "", products: "",
+      supportType: "", products: [],
       objName: "", objSize: "", objType: "", objColour: "", objMaterial: "", objReturn: "",
       mainPurpose: "", movingSpeed: "", fov: "", accuracy: "", background: "",
       cameraModel: "", cameraSpec: "", cameraOthers: "",
@@ -371,9 +394,26 @@ function TaskModal({ task, users, currentUser, onClose, onSave, onDelete }) {
     }
   );
   const [showTech, setShowTech] = useState(false);
+  const [pendingDone, setPendingDone] = useState(false);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const canAssign = currentUser.role === "lead" || currentUser.role === "admin";
   const needsApproval = !task?.id && currentUser.role === "sales";
+
+  const toggleProduct = (item) => {
+    setForm((f) => ({
+      ...f,
+      products: f.products.includes(item) ? f.products.filter((p) => p !== item) : [...f.products, item],
+    }));
+  };
+
+  const handleStatusChange = (e) => {
+    const val = e.target.value;
+    if (val === "done" && form.status !== "done") {
+      setPendingDone(true);
+    } else {
+      set("status", val);
+    }
+  };
 
   const submit = () => {
     if (!form.title.trim()) return;
@@ -384,21 +424,60 @@ function TaskModal({ task, users, currentUser, onClose, onSave, onDelete }) {
     <Modal title={task?.id ? `Edit task ${task.ticket || ""}` : "New task"} onClose={onClose} wide>
       <Field label="Task title"><Input value={form.title} onChange={(e) => set("title", e.target.value)} placeholder="e.g. Set up API for client X" /></Field>
       <Field label="Description"><TextArea value={form.description} onChange={(e) => set("description", e.target.value)} /></Field>
+      <Field label="Project / Company"><Input value={form.project} onChange={(e) => set("project", e.target.value)} placeholder="Project / client / company name" /></Field>
+      <Field label="Products">
+        <div className="rounded-lg p-3" style={{ background: "var(--c-surface-2)", border: "1px solid var(--c-border)" }}>
+          {PRODUCT_CATEGORIES.map((cat) => (
+            <div key={cat.group} className="mb-2 last:mb-0">
+              <div className="text-xs font-semibold mb-1.5" style={{ color: "var(--c-text-dim)" }}>{cat.group}</div>
+              <div className="flex flex-wrap gap-2">
+                {cat.items.map((item) => {
+                  const checked = form.products.includes(item);
+                  return (
+                    <label key={item} className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md cursor-pointer"
+                      style={{
+                        background: checked ? "color-mix(in srgb, var(--c-accent) 18%, transparent)" : "var(--c-surface)",
+                        border: `1px solid ${checked ? "var(--c-accent)" : "var(--c-border)"}`,
+                        color: checked ? "var(--c-accent)" : "var(--c-text)",
+                      }}>
+                      <input type="checkbox" checked={checked} onChange={() => toggleProduct(item)} className="hidden" />
+                      {item}
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      </Field>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="Project / Company"><Input value={form.project} onChange={(e) => set("project", e.target.value)} placeholder="Project / client / company name" /></Field>
-        <Field label="Products"><Input value={form.products} onChange={(e) => set("products", e.target.value)} placeholder="e.g. Machine vision camera system" /></Field>
-        <Field label="Contact Person"><Input value={form.contactPerson} onChange={(e) => set("contactPerson", e.target.value)} /></Field>
-        <Field label="Contact Number"><Input value={form.contactNumber} onChange={(e) => set("contactNumber", e.target.value)} /></Field>
-        <Field label="Support Type"><Input value={form.supportType} onChange={(e) => set("supportType", e.target.value)} placeholder="e.g. On-site testing" /></Field>
+        <Field label="Support Type">
+          <Select value={form.supportType} onChange={(e) => set("supportType", e.target.value)}>
+            <option value="">Select support type</option>
+            {SUPPORT_TYPES.map((s) => <option key={s} value={s}>{s}</option>)}
+          </Select>
+          {form.supportType === "Test Report" && (
+            <p className="text-xs mt-1.5" style={{ color: "var(--c-amber)" }}>Test report processing takes 3-10 days depending on available hardware.</p>
+          )}
+        </Field>
         {needsApproval ? (
           <Field label="Status">
             <div style={{ ...inputStyle, opacity: 0.7 }}>Pending Approval (sent to Technical Leader)</div>
           </Field>
         ) : (
           <Field label="Status">
-            <Select value={form.status} onChange={(e) => set("status", e.target.value)}>
+            <Select value={form.status} onChange={handleStatusChange}>
               {STATUSES.filter((s) => s.key !== "pending").map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
             </Select>
+            {pendingDone && (
+              <div className="mt-2 p-2 rounded-lg flex items-center justify-between gap-2" style={{ background: "var(--c-surface)", border: "1px solid var(--c-accent)" }}>
+                <span className="text-xs">Mark as Done?</span>
+                <div className="flex gap-1.5">
+                  <Button size="sm" variant="ghost" onClick={() => setPendingDone(false)}>Cancel</Button>
+                  <Button size="sm" onClick={() => { set("status", "done"); setPendingDone(false); }}>Confirm</Button>
+                </div>
+              </div>
+            )}
           </Field>
         )}
         <Field label="Priority">
@@ -936,20 +1015,36 @@ export default function App() {
     (async () => {
       const s = await loadSettings();
       setSettings(s);
+      let loadedUsers = DEFAULT_USERS;
       try {
         const [u, t] = await Promise.all([
           loadCollection("users", s), loadCollection("tasks", s),
         ]);
-        setUsers(u.length ? u : DEFAULT_USERS);
+        loadedUsers = u.length ? u : DEFAULT_USERS;
+        setUsers(loadedUsers);
         setTasks(t);
         if (!u.length) await saveCollection("users", DEFAULT_USERS, s);
       } catch (e) {
         notify("Failed to load data from Google Sheets — using local data instead", "error");
         setUsers(DEFAULT_USERS);
       }
+      const sessionId = await loadSession();
+      if (sessionId) {
+        const match = loadedUsers.find((u) => u.id === sessionId);
+        if (match) setCurrentUser(match);
+      }
       setReady(true);
     })();
   }, [notify]);
+
+  const handleLogin = (user) => {
+    setCurrentUser(user);
+    saveSession(user.id);
+  };
+  const handleLogout = () => {
+    setCurrentUser(null);
+    saveSession(null);
+  };
 
   const persist = async (key, data) => {
     try { await saveCollection(key, data, settings); }
@@ -999,7 +1094,7 @@ export default function App() {
   }
 
   if (!currentUser) {
-    return <><GlobalStyle /><LoginScreen users={users} onLogin={setCurrentUser} notify={notify} /><Toast toast={toast} /></>;
+    return <><GlobalStyle /><LoginScreen users={users} onLogin={handleLogin} notify={notify} /><Toast toast={toast} /></>;
   }
 
   return (
@@ -1007,7 +1102,7 @@ export default function App() {
       <GlobalStyle />
       <Sidebar page={page} setPage={setPage} pendingCount={pendingCount} connected={settings.useSheets && !!settings.sheetsUrl} mobileOpen={mobileNavOpen} onClose={() => setMobileNavOpen(false)} />
       <div className="flex-1 min-w-0 flex flex-col">
-        <Topbar title={pageTitles[page]} user={currentUser} onLogout={() => setCurrentUser(null)} onMenuClick={() => setMobileNavOpen(true)} />
+        <Topbar title={pageTitles[page]} user={currentUser} onLogout={handleLogout} onMenuClick={() => setMobileNavOpen(true)} />
         <div className="flex-1 overflow-y-auto">
           {page === "dashboard" && <DashboardView tasks={tasks} />}
           {page === "board" && (
