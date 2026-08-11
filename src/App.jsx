@@ -18,7 +18,7 @@ const STORAGE_SHARED = true;
 const APP_PREFIX = "gateflow";
 // Baked-in default: every device connects to the team's shared Google Sheet
 // automatically, unless that browser has explicitly saved its own settings.
-const DEFAULT_SETTINGS = { useSheets: true, sheetsUrl: "https://script.google.com/macros/s/AKfycbxBtjL8OCh3oLxFRn_rSOcjrqFY_KHX2ET1AN5ri3Jx_4EyR-Kw0ZY_6QNEw8PUPQOS/exec" };
+const DEFAULT_SETTINGS = { useSheets: true, sheetsUrl: "https://script.google.com/macros/s/AKfycbyJFsukvheoP5_XDyfIdB2kJHA4N529djz6IOceLDtBjszC4K2Eg5UeyxgOi21daoR9/exec" };
 
 const STATUSES = [
   { key: "pending", label: "Pending Approval", color: "var(--c-rose)" },
