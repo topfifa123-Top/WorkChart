@@ -398,10 +398,11 @@ function SpecGroup({ label, prefix, form, set }) {
   );
 }
 
-function TaskModal({ task, users, currentUser, settings, onClose, onSave, onDelete, onAddComment, notify }) {
+function TaskModal({ task, users, tasks, currentUser, settings, onClose, onSave, onDelete, onAddComment, notify }) {
   const [form, setForm] = useState(
     task || {
       title: "", description: "", project: "", status: "backlog", priority: "medium", assignee: "", dueDate: "",
+      ticket: nextTicket(tasks, "ticket", "OPT"),
       supportType: "", products: [],
       objName: "", objSize: "", objType: "", objColour: "", objMaterial: "", objReturn: "",
       mainPurpose: "", movingSpeed: "", fov: "", accuracy: "", background: "",
@@ -439,7 +440,7 @@ function TaskModal({ task, users, currentUser, settings, onClose, onSave, onDele
         const res = await fetch(settings.sheetsUrl, {
           method: "POST",
           headers: { "Content-Type": "text/plain;charset=utf-8" },
-          body: JSON.stringify({ action: "uploadFile", name: file.name, mimeType: file.type, data: dataUrl.split(",")[1], folder: task?.ticket || "Unfiled" }),
+          body: JSON.stringify({ action: "uploadFile", name: file.name, mimeType: file.type, data: dataUrl.split(",")[1], folder: form.ticket || "Unfiled" }),
           signal: controller.signal,
         });
         const json = await res.json();
@@ -504,7 +505,7 @@ function TaskModal({ task, users, currentUser, settings, onClose, onSave, onDele
   };
 
   return (
-    <Modal title={task?.id ? `Edit task ${task.ticket || ""}` : "New task"} onClose={onClose} wide>
+    <Modal title={task?.id ? `Edit task ${task.ticket || ""}` : `New task (${form.ticket})`} onClose={onClose} wide>
       <Field label="Task title"><Input value={form.title} onChange={(e) => set("title", e.target.value)} placeholder="e.g. Set up API for client X" /></Field>
       <Field label="Description"><TextArea value={form.description} onChange={(e) => set("description", e.target.value)} /></Field>
       <Field label="Project / Company"><Input value={form.project} onChange={(e) => set("project", e.target.value)} placeholder="Project / client / company name" /></Field>
@@ -1254,7 +1255,7 @@ export default function App() {
       updateTasks(tasks.map((t) => (t.id === form.id ? { ...form } : t)));
       notify("Task saved");
     } else {
-      const ticket = nextTicket(tasks, "ticket", "OPT");
+      const ticket = form.ticket || nextTicket(tasks, "ticket", "OPT");
       updateTasks([...tasks, { ...form, id: uid(), ticket, createdBy: currentUser.name, createdAt: new Date().toISOString() }]);
       notify(form.status === "pending" ? "Request submitted for approval" : "Task saved");
     }
@@ -1316,7 +1317,7 @@ export default function App() {
       </div>
 
       {taskModal !== null && (
-        <TaskModal task={taskModal.task} users={users} currentUser={currentUser} settings={settings} onClose={() => setTaskModal(null)} onSave={saveTask} onDelete={deleteTask} onAddComment={addComment} notify={notify} />
+        <TaskModal task={taskModal.task} users={users} tasks={tasks} currentUser={currentUser} settings={settings} onClose={() => setTaskModal(null)} onSave={saveTask} onDelete={deleteTask} onAddComment={addComment} notify={notify} />
       )}
       <Toast toast={toast} />
     </div>
