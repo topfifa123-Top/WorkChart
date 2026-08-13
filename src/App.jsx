@@ -439,7 +439,7 @@ function TaskModal({ task, users, currentUser, settings, onClose, onSave, onDele
         const res = await fetch(settings.sheetsUrl, {
           method: "POST",
           headers: { "Content-Type": "text/plain;charset=utf-8" },
-          body: JSON.stringify({ action: "uploadFile", name: file.name, mimeType: file.type, data: dataUrl.split(",")[1] }),
+          body: JSON.stringify({ action: "uploadFile", name: file.name, mimeType: file.type, data: dataUrl.split(",")[1], folder: task?.ticket || "Unfiled" }),
           signal: controller.signal,
         });
         const json = await res.json();
