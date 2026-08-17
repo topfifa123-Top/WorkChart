@@ -245,7 +245,7 @@ function Toast({ toast }) {
 
 function Modal({ title, onClose, children, wide }) {
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center p-4" style={{ background: "rgba(6,9,14,0.65)" }} onClick={onClose}>
+    <div className="fixed inset-0 z-40 flex items-center justify-center p-4" style={{ background: "rgba(6,9,14,0.65)" }}>
       <div onClick={(e) => e.stopPropagation()} className="w-full rounded-2xl overflow-hidden"
         style={{ maxWidth: wide ? 640 : 460, background: "var(--c-surface)", border: "1px solid var(--c-border)" }}>
         <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: "1px solid var(--c-border)" }}>
