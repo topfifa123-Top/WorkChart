@@ -1022,7 +1022,7 @@ function CalendarView({ tasks, users, onOpen }) {
                       return (
                         <div key={t.id} onClick={() => onOpen(t)} className="text-[11px] px-1.5 py-0.5 rounded truncate cursor-pointer"
                           style={{ background: `color-mix(in srgb, ${s?.color} 18%, transparent)`, color: s?.color }}>
-                          {t.title}
+                          {t.supportType === "Onsite" && t.dueTime ? `${t.dueTime} ` : ""}{t.title}
                         </div>
                       );
                     })}
