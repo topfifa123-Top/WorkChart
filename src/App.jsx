@@ -403,7 +403,7 @@ function TaskModal({ task, users, tasks, currentUser, settings, onClose, onSave,
     task || {
       title: "", description: "", project: "", status: "backlog", priority: "medium", assignee: "", dueDate: "",
       ticket: nextTicket(tasks, "ticket", "OPT"),
-      supportType: "", products: [],
+      supportType: "", products: [], dueTime: "",
       objName: "", objSize: "", objType: "", objColour: "", objMaterial: "", objReturn: "",
       mainPurpose: "", movingSpeed: "", fov: "", accuracy: "", background: "",
       cameraModel: "", cameraSpec: "", cameraOthers: "",
@@ -570,6 +570,9 @@ function TaskModal({ task, users, tasks, currentUser, settings, onClose, onSave,
           </Select>
         </Field>
         <Field label="Due date"><Input type="date" value={form.dueDate} onChange={(e) => set("dueDate", e.target.value)} /></Field>
+        {form.supportType === "Onsite" && (
+          <Field label="Time"><Input type="time" value={form.dueTime} onChange={(e) => set("dueTime", e.target.value)} /></Field>
+        )}
         {task?.id && (
           <Field label="Assignee">
             {canAssign ? (
@@ -783,7 +786,7 @@ function TaskCard({ task, onDragStart, onClick, canDecide, onApprove, onReject }
         )}
         <div className="flex items-center justify-between text-xs" style={{ color: overdue ? "var(--c-danger)" : "var(--c-text-dim)" }}>
           <span>{task.assignee || "Unassigned"}</span>
-          <span>{fmtDate(task.dueDate)}</span>
+          <span>{fmtDate(task.dueDate)}{task.supportType === "Onsite" && task.dueTime ? ` ${task.dueTime}` : ""}</span>
         </div>
       </div>
       {isPending && canDecide && (
