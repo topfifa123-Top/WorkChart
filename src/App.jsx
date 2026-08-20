@@ -732,9 +732,10 @@ function DashboardView({ tasks }) {
 
   return (
     <div className="p-5 md:p-8 space-y-6">
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <StatCard icon={ListChecks} label="Total tasks" value={tasks.length} color="var(--c-info)" />
         <StatCard icon={Clock} label="Pending Approval" value={pending} color="var(--c-rose)" />
+        <StatCard icon={AlertCircle} label="Follow up" value={tasks.filter((t) => t.status === "followup").length} color="var(--c-orange)" />
         <StatCard icon={CheckCircle2} label="Completed" value={tasks.filter((t) => t.status === "done").length} color="var(--c-accent)" />
         <StatCard icon={AlertCircle} label="Overdue" value={overdue} color="var(--c-danger)" />
       </div>
