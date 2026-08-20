@@ -27,6 +27,7 @@ const STATUSES = [
   { key: "backlog", label: "Not Started", color: "var(--c-text-dim)" },
   { key: "todo", label: "To Do", color: "var(--c-info)" },
   { key: "inprogress", label: "In Progress", color: "var(--c-amber)" },
+  { key: "followup", label: "Follow up", color: "var(--c-orange)" },
   { key: "review", label: "Review", color: "var(--c-purple)" },
   { key: "done", label: "Done", color: "var(--c-accent)" },
 ];
@@ -1344,6 +1345,7 @@ function GlobalStyle() {
         --c-info: #5B8DEF;
         --c-purple: #A78BFA;
         --c-rose: #F472B6;
+        --c-orange: #FB923C;
         --f-display: 'Space Grotesk', sans-serif;
         --f-mono: 'JetBrains Mono', monospace;
       }
