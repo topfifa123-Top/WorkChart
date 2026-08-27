@@ -559,7 +559,7 @@ function TaskModal({ task, users, tasks, currentUser, settings, onClose, onSave,
                 <span className="text-xs">Mark as Done?</span>
                 <div className="flex gap-1.5">
                   <Button size="sm" variant="ghost" onClick={() => setPendingDone(false)}>Cancel</Button>
-                  <Button size="sm" onClick={() => { set("status", "done"); setPendingDone(false); }}>Confirm</Button>
+                  <Button size="sm" onClick={() => { setPendingDone(false); onSave({ ...form, status: "done" }); }}>Confirm</Button>
                 </div>
               </div>
             )}
