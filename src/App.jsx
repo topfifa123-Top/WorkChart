@@ -416,6 +416,7 @@ function TaskModal({ task, users, tasks, currentUser, settings, onClose, onSave,
   );
   const [showTech, setShowTech] = useState(false);
   const [pendingDone, setPendingDone] = useState(false);
+  const [pendingResubmit, setPendingResubmit] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [commentText, setCommentText] = useState("");
   const [linkName, setLinkName] = useState("");
@@ -423,6 +424,7 @@ function TaskModal({ task, users, tasks, currentUser, settings, onClose, onSave,
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const canAssign = currentUser.role === "lead" || currentUser.role === "admin";
   const needsApproval = !task?.id && currentUser.role === "sales";
+  const isRejected = !!(task?.id && task.rejected);
   const sheetsConnected = settings.useSheets && !!settings.sheetsUrl;
 
   const handleFileUpload = async (e) => {
@@ -507,6 +509,19 @@ function TaskModal({ task, users, tasks, currentUser, settings, onClose, onSave,
 
   return (
     <Modal title={task?.id ? `Edit task ${task.ticket || ""}` : `New task (${form.ticket})`} onClose={onClose} wide>
+      {isRejected && (
+        <div className="mb-4 p-3 rounded-lg text-xs leading-relaxed" style={{ background: "color-mix(in srgb, var(--c-danger) 12%, transparent)", border: "1px solid var(--c-danger)", color: "var(--c-danger)" }}>
+          This request was rejected. Edit the details below, then confirm to resubmit for review.
+        </div>
+      )}
+      {needsApproval && (
+        <div className="mb-4 p-3 rounded-lg text-xs leading-relaxed" style={{ background: "color-mix(in srgb, var(--c-amber) 14%, transparent)", border: "1px solid var(--c-amber)", color: "var(--c-text)" }}>
+          <div className="font-semibold mb-1.5" style={{ color: "var(--c-amber)" }}>⚠ ก่อนส่งคำขอ กรุณากรอกให้ครบถ้วน</div>
+          <div className="mb-1"><b>หัวข้องาน:</b> ให้ใช้ฟอร์ม ชื่อลูกค้า / ชื่องานที่ทำ / Task ที่ให้ทำ เช่น "Onsite Test Report"</div>
+          <div className="mb-1"><b>รายละเอียด:</b> ระบุให้ละเอียดว่างานเป็นอะไร ต้องการเทสอะไรบ้าง เพื่อให้การติดตามงานย้อนหลังมีประสิทธิภาพ</div>
+          <div><b>หากกรอกข้อมูลไม่ครบ คำขอจะถูก Reject กลับมาให้แก้ไขก่อน</b> จะยังไม่สามารถดำเนินการต่อได้จนกว่าจะเติมข้อมูลส่วนที่ขาดให้ครบ</div>
+        </div>
+      )}
       <Field label="Task title"><Input value={form.title} onChange={(e) => set("title", e.target.value)} placeholder="e.g. Set up API for client X" /></Field>
       <Field label="Description"><TextArea value={form.description} onChange={(e) => set("description", e.target.value)} /></Field>
       <Field label="Project / Company"><Input value={form.project} onChange={(e) => set("project", e.target.value)} placeholder="Project / client / company name" /></Field>
@@ -697,9 +712,21 @@ function TaskModal({ task, users, tasks, currentUser, settings, onClose, onSave,
             <Button variant="danger" size="sm" onClick={() => onDelete(task.id)}><Trash2 size={14} /> Delete</Button>
           )}
         </div>
-        <div className="flex gap-2">
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button onClick={submit}>{needsApproval ? "Submit for approval" : "Save"}</Button>
+        <div className="flex items-center gap-2">
+          {isRejected && pendingResubmit ? (
+            <>
+              <span className="text-xs" style={{ color: "var(--c-text-dim)" }}>Confirm resubmission?</span>
+              <Button variant="ghost" onClick={() => setPendingResubmit(false)}>Cancel</Button>
+              <Button onClick={() => onSave({ ...form, rejected: false })}>Confirm</Button>
+            </>
+          ) : (
+            <>
+              <Button variant="ghost" onClick={onClose}>Cancel</Button>
+              <Button onClick={isRejected ? () => setPendingResubmit(true) : submit}>
+                {needsApproval ? "Submit for approval" : isRejected ? "Resubmit for approval" : "Save"}
+              </Button>
+            </>
+          )}
         </div>
       </div>
     </Modal>
@@ -778,6 +805,11 @@ function TaskCard({ task, onDragStart, onClick, canDecide, onApprove, onReject }
           <Badge color={pr?.color}>{pr?.label}</Badge>
         </div>
         <div className="text-sm font-medium mb-1.5">{task.title}</div>
+        {task.rejected && (
+          <div className="mb-1.5">
+            <Badge color="var(--c-danger)">Rejected — needs edits</Badge>
+          </div>
+        )}
         {task.project && <div className="text-xs mb-1.5" style={{ color: "var(--c-text-dim)" }}>{task.project}</div>}
         {sla && (
           <div className="mb-1.5">
@@ -1274,8 +1306,8 @@ export default function App() {
     notify("Approved — moved to Not Started");
   };
   const rejectTask = (id) => {
-    updateTasks(tasks.filter((t) => t.id !== id));
-    notify("Request rejected", "info");
+    updateTasks(tasks.map((t) => (t.id === id ? { ...t, rejected: true } : t)));
+    notify("Marked as rejected — sent back for edits", "info");
   };
   const addComment = (taskId, comments) => {
     updateTasks(tasks.map((t) => (t.id === taskId ? { ...t, comments } : t)));
