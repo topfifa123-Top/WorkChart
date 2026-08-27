@@ -399,7 +399,7 @@ function SpecGroup({ label, prefix, form, set }) {
   );
 }
 
-function TaskModal({ task, users, tasks, currentUser, settings, onClose, onSave, onDelete, onAddComment, notify }) {
+function TaskModal({ task, users, tasks, currentUser, settings, onClose, onSave, onDelete, onAddComment, onToggleArchive, notify }) {
   const [form, setForm] = useState(
     task || {
       title: "", description: "", project: "", status: "backlog", priority: "medium", assignee: "", dueDate: "",
@@ -509,12 +509,17 @@ function TaskModal({ task, users, tasks, currentUser, settings, onClose, onSave,
 
   return (
     <Modal title={task?.id ? `Edit task ${task.ticket || ""}` : `New task (${form.ticket})`} onClose={onClose} wide>
+      {task?.id && task.archived && (
+        <div className="mb-4 p-3 rounded-lg text-xs" style={{ background: "var(--c-surface-2)", border: "1px solid var(--c-border)", color: "var(--c-text-dim)" }}>
+          This task is archived — hidden from the Kanban Board. Click "Unarchive" below to bring it back.
+        </div>
+      )}
       {isRejected && (
         <div className="mb-4 p-3 rounded-lg text-xs leading-relaxed" style={{ background: "color-mix(in srgb, var(--c-danger) 12%, transparent)", border: "1px solid var(--c-danger)", color: "var(--c-danger)" }}>
           This request was rejected. Edit the details below, then confirm to resubmit for review.
         </div>
       )}
-      {needsApproval && (
+      {!task?.id && (
         <div className="mb-4 p-3 rounded-lg text-xs leading-relaxed" style={{ background: "color-mix(in srgb, var(--c-amber) 14%, transparent)", border: "1px solid var(--c-amber)", color: "var(--c-text)" }}>
           <div className="font-semibold mb-1.5" style={{ color: "var(--c-amber)" }}>⚠ ก่อนส่งคำขอ กรุณากรอกให้ครบถ้วน</div>
           <div className="mb-1"><b>หัวข้องาน:</b> ให้ใช้ฟอร์ม ชื่อลูกค้า / ชื่องานที่ทำ / Task ที่ให้ทำ เช่น "Onsite Test Report"</div>
@@ -707,9 +712,16 @@ function TaskModal({ task, users, tasks, currentUser, settings, onClose, onSave,
       )}
 
       <div className="flex items-center justify-between mt-4">
-        <div>
+        <div className="flex items-center gap-2">
           {task?.id && (
-            <Button variant="danger" size="sm" onClick={() => onDelete(task.id)}><Trash2 size={14} /> Delete</Button>
+            <>
+              <Button variant="danger" size="sm" onClick={() => onDelete(task.id)}><Trash2 size={14} /> Delete</Button>
+              {canAssign && (
+                <Button variant="subtle" size="sm" onClick={() => onToggleArchive(task.id)}>
+                  {task.archived ? "Unarchive" : "Archive"}
+                </Button>
+              )}
+            </>
           )}
         </div>
         <div className="flex items-center gap-2">
@@ -858,7 +870,7 @@ function BoardView({ tasks, onMove, onOpen, onNew, canDecide, onApprove, onRejec
       </div>
       <div className="flex gap-4 overflow-x-auto pb-4">
         {STATUSES.map((s) => {
-          const items = tasks.filter((t) => t.status === s.key);
+          const items = tasks.filter((t) => t.status === s.key && !t.archived);
           return (
             <div key={s.key} onDragOver={(e) => { e.preventDefault(); setDragOver(s.key); }}
               onDragLeave={() => setDragOver(null)} onDrop={(e) => onDrop(e, s.key)}
@@ -891,6 +903,7 @@ function TaskListView({ tasks, onOpen, onNew, currentUser }) {
   const [search, setSearch] = useState("");
   const [statusF, setStatusF] = useState("");
   const [prF, setPrF] = useState("");
+  const [hideArchived, setHideArchived] = useState(false);
   const [sortKey, setSortKey] = useState("dueDate");
   const [sortDir, setSortDir] = useState(1);
   const canExport = ["lead", "admin"].includes(currentUser.role);
@@ -899,14 +912,15 @@ function TaskListView({ tasks, onOpen, onNew, currentUser }) {
     let list = tasks.filter((t) =>
       (!search || `${t.title} ${t.project} ${t.assignee}`.toLowerCase().includes(search.toLowerCase())) &&
       (!statusF || t.status === statusF) &&
-      (!prF || t.priority === prF)
+      (!prF || t.priority === prF) &&
+      (!hideArchived || !t.archived)
     );
     list.sort((a, b) => {
       const av = a[sortKey] || "", bv = b[sortKey] || "";
       return av > bv ? sortDir : av < bv ? -sortDir : 0;
     });
     return list;
-  }, [tasks, search, statusF, prF, sortKey, sortDir]);
+  }, [tasks, search, statusF, prF, hideArchived, sortKey, sortDir]);
 
   const exportToExcel = () => {
     const rows = filtered.map((t) => ({
@@ -948,6 +962,10 @@ function TaskListView({ tasks, onOpen, onNew, currentUser }) {
           <option value="">All priorities</option>
           {PRIORITIES.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
         </Select>
+        <label className="flex items-center gap-1.5 text-xs" style={{ color: "var(--c-text-dim)" }}>
+          <input type="checkbox" checked={hideArchived} onChange={(e) => setHideArchived(e.target.checked)} />
+          Hide archived
+        </label>
         {canExport && <Button variant="subtle" onClick={exportToExcel}><Download size={15} /> Export</Button>}
         <Button onClick={onNew}><Plus size={15} /> New task</Button>
       </div>
@@ -973,7 +991,12 @@ function TaskListView({ tasks, onOpen, onNew, currentUser }) {
                   style={{ background: "var(--c-surface)", borderTop: "1px solid var(--c-border)" }}>
                   <td className="px-3 py-2.5"><Ticket id={t.ticket} /></td>
                   <td className="px-3 py-2.5 font-medium">{t.title}</td>
-                  <td className="px-3 py-2.5"><Badge color={s?.color}>{s?.label}</Badge></td>
+                  <td className="px-3 py-2.5">
+                    <div className="flex items-center gap-1.5">
+                      <Badge color={s?.color}>{s?.label}</Badge>
+                      {t.archived && <Badge color="var(--c-text-dim)">Archived</Badge>}
+                    </div>
+                  </td>
                   <td className="px-3 py-2.5"><Badge color={p?.color}>{p?.label}</Badge></td>
                   <td className="px-3 py-2.5" style={{ color: "var(--c-text-dim)" }}>{t.assignee || "—"}</td>
                   <td className="px-3 py-2.5" style={{ color: isOverdue(t) ? "var(--c-danger)" : "var(--c-text-dim)" }}>{fmtDate(t.dueDate)}</td>
@@ -1312,6 +1335,13 @@ export default function App() {
   const addComment = (taskId, comments) => {
     updateTasks(tasks.map((t) => (t.id === taskId ? { ...t, comments } : t)));
   };
+  const toggleArchive = (id) => {
+    const t = tasks.find((x) => x.id === id);
+    if (!t) return;
+    updateTasks(tasks.map((x) => (x.id === id ? { ...x, archived: !x.archived } : x)));
+    notify(t.archived ? "Unarchived — visible on the board again" : "Archived — hidden from the board");
+    setTaskModal(null);
+  };
 
   const pendingCount = tasks.filter((t) => t.status === "pending").length;
   const canDecide = ["lead", "admin"].includes(currentUser?.role);
@@ -1354,7 +1384,7 @@ export default function App() {
       </div>
 
       {taskModal !== null && (
-        <TaskModal task={taskModal.task} users={users} tasks={tasks} currentUser={currentUser} settings={settings} onClose={() => setTaskModal(null)} onSave={saveTask} onDelete={deleteTask} onAddComment={addComment} notify={notify} />
+        <TaskModal task={taskModal.task} users={users} tasks={tasks} currentUser={currentUser} settings={settings} onClose={() => setTaskModal(null)} onSave={saveTask} onDelete={deleteTask} onAddComment={addComment} onToggleArchive={toggleArchive} notify={notify} />
       )}
       <Toast toast={toast} />
     </div>
