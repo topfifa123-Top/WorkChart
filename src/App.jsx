@@ -49,7 +49,7 @@ const ROLES = [
   { key: "admin", label: "Admin" },
   { key: "sales", label: "Sales" },
   { key: "lead", label: "Technical Leader" },
-  { key: "member", label: "Member" },
+  { key: "member", label: "Technical" },
 ];
 
 const DEFAULT_USERS = [
@@ -425,6 +425,7 @@ function TaskModal({ task, users, tasks, currentUser, settings, onClose, onSave,
   const canAssign = currentUser.role === "lead" || currentUser.role === "admin";
   const needsApproval = !task?.id && currentUser.role === "sales";
   const isRejected = !!(task?.id && task.rejected);
+  const salesEditingExisting = !!(task?.id && currentUser.role === "sales" && !isRejected);
   const sheetsConnected = settings.useSheets && !!settings.sheetsUrl;
 
   const handleFileUpload = async (e) => {
@@ -504,7 +505,8 @@ function TaskModal({ task, users, tasks, currentUser, settings, onClose, onSave,
 
   const submit = () => {
     if (!form.title.trim()) return;
-    onSave(needsApproval ? { ...form, status: "pending" } : form);
+    if (needsApproval || salesEditingExisting) { onSave({ ...form, status: "pending" }); return; }
+    onSave(form);
   };
 
   return (
@@ -568,6 +570,10 @@ function TaskModal({ task, users, tasks, currentUser, settings, onClose, onSave,
         {needsApproval ? (
           <Field label="Status">
             <div style={{ ...inputStyle, opacity: 0.7 }}>Pending Approval (sent to Technical Leader)</div>
+          </Field>
+        ) : salesEditingExisting ? (
+          <Field label="Status">
+            <div style={{ ...inputStyle, opacity: 0.7 }}>Will return to Pending Approval on save</div>
           </Field>
         ) : (
           <Field label="Status">
@@ -735,7 +741,7 @@ function TaskModal({ task, users, tasks, currentUser, settings, onClose, onSave,
             <>
               <Button variant="ghost" onClick={onClose}>Cancel</Button>
               <Button onClick={isRejected ? () => setPendingResubmit(true) : submit}>
-                {needsApproval ? "Submit for approval" : isRejected ? "Resubmit for approval" : "Save"}
+                {needsApproval ? "Submit for approval" : isRejected ? "Resubmit for approval" : salesEditingExisting ? "Save & send for re-approval" : "Save"}
               </Button>
             </>
           )}
