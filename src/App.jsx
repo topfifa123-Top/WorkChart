@@ -17,20 +17,39 @@ import * as XLSX from "xlsx";
 
 const STORAGE_SHARED = true;
 const APP_PREFIX = "gateflow";
-const SESSION_IDLE_MS = 60 * 60 * 1000; // auto sign-out after 1 hour of no activity
 // Baked-in default: every device connects to the team's shared Google Sheet
 // automatically, unless that browser has explicitly saved its own settings.
-const DEFAULT_SETTINGS = { useSheets: true, sheetsUrl: "https://script.google.com/macros/s/AKfycbyJFsukvheoP5_XDyfIdB2kJHA4N529djz6IOceLDtBjszC4K2Eg5UeyxgOi21daoR9/exec" };
+const DEFAULT_SETTINGS = {
+  useSheets: true,
+  sheetsUrl: "https://script.google.com/macros/s/AKfycbyJFsukvheoP5_XDyfIdB2kJHA4N529djz6IOceLDtBjszC4K2Eg5UeyxgOi21daoR9/exec",
+  ticketPrefix: "OPT",
+  slaMinDays: 3,
+  slaMaxDays: 10,
+  maxFileSizeMB: 30,
+  uploadTimeoutSec: 180,
+  idleTimeoutMin: 60,
+};
 
-const STATUSES = [
-  { key: "pending", label: "Pending Approval", color: "var(--c-rose)" },
+// "Pending Approval" and "Done" are fixed anchors the approval/completion
+// workflow depends on — only the columns between them are customizable via
+// Settings > App Configuration. getStatuses() builds the full list each time
+// from whatever the admin has configured (or these defaults).
+const DEFAULT_KANBAN_MIDDLE = [
   { key: "backlog", label: "Not Started", color: "var(--c-text-dim)" },
   { key: "todo", label: "To Do", color: "var(--c-info)" },
   { key: "inprogress", label: "In Progress", color: "var(--c-amber)" },
   { key: "followup", label: "Follow up", color: "var(--c-orange)" },
   { key: "review", label: "Review", color: "var(--c-purple)" },
-  { key: "done", label: "Done", color: "var(--c-accent)" },
 ];
+
+function getStatuses(settings) {
+  const middle = (settings && settings.kanbanColumns) || DEFAULT_KANBAN_MIDDLE;
+  return [
+    { key: "pending", label: "Pending Approval", color: "var(--c-rose)" },
+    ...middle,
+    { key: "done", label: "Done", color: "var(--c-accent)" },
+  ];
+}
 
 const PRIORITIES = [
   { key: "low", label: "Low", color: "var(--c-info)" },
@@ -38,12 +57,30 @@ const PRIORITIES = [
   { key: "high", label: "High", color: "var(--c-danger)" },
 ];
 
-const PRODUCT_CATEGORIES = [
+const DEFAULT_PRODUCT_CATEGORIES = [
   { group: "Software", items: ["Smart 3", "DeepVision 3"] },
   { group: "Hardware", items: ["Smart Cameras", "Industrial Cameras", "Smart Code Readers", "3D Cameras", "Industrial Lenses", "Standard Light Source", "Light Source Controller", "Measurement Systems"] },
 ];
 
-const SUPPORT_TYPES = ["Onsite", "Training", "Test Report", "Collect image"];
+const DEFAULT_SUPPORT_TYPES = ["Onsite", "Training", "Test Report", "Collect image"];
+
+function slugifyKey(label, existingKeys) {
+  let base = label.toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 20) || "column";
+  let key = base, i = 2;
+  while (existingKeys.includes(key)) { key = base + i; i++; }
+  return key;
+}
+
+const COLUMN_COLOR_OPTIONS = [
+  { label: "Grey", value: "var(--c-text-dim)" },
+  { label: "Blue", value: "var(--c-info)" },
+  { label: "Amber", value: "var(--c-amber)" },
+  { label: "Orange", value: "var(--c-orange)" },
+  { label: "Purple", value: "var(--c-purple)" },
+  { label: "Rose", value: "var(--c-rose)" },
+  { label: "Teal", value: "var(--c-accent)" },
+];
+
 
 const ROLES = [
   { key: "admin", label: "Admin" },
@@ -82,11 +119,11 @@ function isOverdue(task) {
   return new Date(task.dueDate + "T00:00:00") < today;
 }
 
-function slaInfo(task) {
+function slaInfo(task, minDays, maxDays) {
   if (task.supportType !== "Test Report" || !task.createdAt || task.status === "done" || task.status === "pending") return null;
   const daysElapsed = Math.floor((new Date() - new Date(task.createdAt)) / 86400000);
-  const level = daysElapsed > 10 ? "overdue" : daysElapsed >= 3 ? "warning" : "ontrack";
-  return { daysElapsed, level };
+  const level = daysElapsed > maxDays ? "overdue" : daysElapsed >= minDays ? "warning" : "ontrack";
+  return { daysElapsed, level, minDays, maxDays };
 }
 
 function fileToDataUrl(file) {
@@ -302,13 +339,13 @@ function LoginScreen({ users, onLogin, notify }) {
 /* Sidebar + Topbar                                                       */
 /* ---------------------------------------------------------------------- */
 
-function Sidebar({ page, setPage, pendingCount, connected, mobileOpen, onClose }) {
+function Sidebar({ page, setPage, pendingCount, connected, mobileOpen, onClose, canSeeSettings }) {
   const items = [
     { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
     { key: "board", label: "Kanban Board", icon: Trello, badge: pendingCount },
     { key: "tasks", label: "Task List", icon: ListChecks },
     { key: "calendar", label: "Calendar", icon: CalendarDays },
-    { key: "settings", label: "Settings", icon: SettingsIcon },
+    ...(canSeeSettings ? [{ key: "settings", label: "Settings", icon: SettingsIcon }] : []),
   ];
   return (
     <>
@@ -358,7 +395,7 @@ function Sidebar({ page, setPage, pendingCount, connected, mobileOpen, onClose }
   );
 }
 
-function Topbar({ title, user, onLogout, onMenuClick }) {
+function Topbar({ title, user, onLogout, onMenuClick, onOpenAccount }) {
   return (
     <div className="flex items-center justify-between px-4 sm:px-5 md:px-8 py-4" style={{ borderBottom: "1px solid var(--c-border)" }}>
       <div className="flex items-center gap-3 min-w-0">
@@ -372,10 +409,10 @@ function Topbar({ title, user, onLogout, onMenuClick }) {
           <div className="text-sm font-medium">{user.name}</div>
           <div className="text-xs" style={{ color: "var(--c-text-dim)" }}>{ROLES.find((r) => r.key === user.role)?.label}</div>
         </div>
-        <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold"
+        <button onClick={onOpenAccount} title="My Account" className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold"
           style={{ background: "var(--c-surface-2)", border: "1px solid var(--c-border)" }}>
           {user.name?.[0]?.toUpperCase()}
-        </div>
+        </button>
         <button onClick={onLogout} title="Sign out" style={{ color: "var(--c-text-dim)" }}><LogOut size={18} /></button>
       </div>
     </div>
@@ -403,7 +440,7 @@ function TaskModal({ task, users, tasks, currentUser, settings, onClose, onSave,
   const [form, setForm] = useState(
     task || {
       title: "", description: "", project: "", status: "backlog", priority: "medium", assignee: "", dueDate: "",
-      ticket: nextTicket(tasks, "ticket", "OPT"),
+      ticket: nextTicket(tasks, "ticket", settings.ticketPrefix || "OPT"),
       supportType: "", products: [], dueTime: "",
       objName: "", objSize: "", objType: "", objColour: "", objMaterial: "", objReturn: "",
       mainPurpose: "", movingSpeed: "", fov: "", accuracy: "", background: "",
@@ -425,6 +462,9 @@ function TaskModal({ task, users, tasks, currentUser, settings, onClose, onSave,
   const canAssign = currentUser.role === "lead" || currentUser.role === "admin";
   const needsApproval = !task?.id && currentUser.role === "sales";
   const isRejected = !!(task?.id && task.rejected);
+  const STATUSES = getStatuses(settings);
+  const PRODUCT_CATEGORIES = settings.productCategories || DEFAULT_PRODUCT_CATEGORIES;
+  const SUPPORT_TYPES = settings.supportTypes || DEFAULT_SUPPORT_TYPES;
   const salesEditingExisting = !!(task?.id && currentUser.role === "sales" && !isRejected);
   const sheetsConnected = settings.useSheets && !!settings.sheetsUrl;
 
@@ -433,12 +473,14 @@ function TaskModal({ task, users, tasks, currentUser, settings, onClose, onSave,
     if (!files.length) return;
     setUploading(true);
     for (const file of files) {
-      if (file.size > 30 * 1024 * 1024) {
-        notify(`${file.name} is over 30MB — skipped`, "error");
+      const maxFileSizeMB = settings.maxFileSizeMB || 30;
+      if (file.size > maxFileSizeMB * 1024 * 1024) {
+        notify(`${file.name} is over ${maxFileSizeMB}MB — skipped`, "error");
         continue;
       }
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 180000); // 3 minutes
+      const uploadTimeoutSec = settings.uploadTimeoutSec || 180;
+      const timeoutId = setTimeout(() => controller.abort(), uploadTimeoutSec * 1000);
       try {
         const dataUrl = await fileToDataUrl(file);
         const res = await fetch(settings.sheetsUrl, {
@@ -455,7 +497,7 @@ function TaskModal({ task, users, tasks, currentUser, settings, onClose, onSave,
         }
       } catch (err) {
         notify(
-          err.name === "AbortError" ? `Uploading ${file.name} timed out after 3 minutes` : `Failed to upload ${file.name}`,
+          err.name === "AbortError" ? `Uploading ${file.name} timed out after ${uploadTimeoutSec}s` : `Failed to upload ${file.name}`,
           "error"
         );
       } finally {
@@ -667,7 +709,7 @@ function TaskModal({ task, users, tasks, currentUser, settings, onClose, onSave,
           <>
             <input type="file" multiple onChange={handleFileUpload} disabled={uploading}
               className="text-xs w-full" style={{ color: "var(--c-text-dim)" }} />
-            <p className="text-xs mt-1" style={{ color: "var(--c-text-dim)" }}>Files over 30MB — upload to the "GateFlow Attachments" Drive folder yourself and paste the share link below instead.</p>
+            <p className="text-xs mt-1" style={{ color: "var(--c-text-dim)" }}>Files over {settings.maxFileSizeMB || 30}MB — upload to the "GateFlow Attachments" Drive folder yourself and paste the share link below instead.</p>
             {uploading && <p className="text-xs mt-1" style={{ color: "var(--c-text-dim)" }}>Uploading...</p>}
           </>
         ) : (
@@ -769,7 +811,8 @@ function StatCard({ icon: Icon, label, value, color }) {
   );
 }
 
-function DashboardView({ tasks }) {
+function DashboardView({ tasks, settings }) {
+  const STATUSES = getStatuses(settings);
   const statusData = STATUSES.map((s) => ({ name: s.label, value: tasks.filter((t) => t.status === s.key).length, color: s.color }));
   const pending = tasks.filter((t) => t.status === "pending").length;
   const overdue = tasks.filter(isOverdue).length;
@@ -807,10 +850,10 @@ function DashboardView({ tasks }) {
 /* Kanban Board                                                           */
 /* ---------------------------------------------------------------------- */
 
-function TaskCard({ task, onDragStart, onClick, canDecide, onApprove, onReject }) {
+function TaskCard({ task, onDragStart, onClick, canDecide, onApprove, onReject, settings }) {
   const pr = PRIORITIES.find((p) => p.key === task.priority);
   const overdue = isOverdue(task);
-  const sla = slaInfo(task);
+  const sla = slaInfo(task, settings.slaMinDays, settings.slaMaxDays);
   const [confirmingReject, setConfirmingReject] = useState(false);
   const isPending = task.status === "pending";
   return (
@@ -832,7 +875,7 @@ function TaskCard({ task, onDragStart, onClick, canDecide, onApprove, onReject }
         {sla && (
           <div className="mb-1.5">
             <Badge color={sla.level === "overdue" ? "var(--c-danger)" : sla.level === "warning" ? "var(--c-amber)" : "var(--c-info)"}>
-              Day {sla.daysElapsed} / 3-10 (Test report)
+              Day {sla.daysElapsed} / {sla.minDays}-{sla.maxDays} (Test report)
             </Badge>
           </div>
         )}
@@ -860,7 +903,8 @@ function TaskCard({ task, onDragStart, onClick, canDecide, onApprove, onReject }
   );
 }
 
-function BoardView({ tasks, onMove, onOpen, onNew, canDecide, onApprove, onReject }) {
+function BoardView({ tasks, onMove, onOpen, onNew, canDecide, onApprove, onReject, settings }) {
+  const STATUSES = getStatuses(settings);
   const [dragOver, setDragOver] = useState(null);
   const onDragStart = (e, id) => e.dataTransfer.setData("text/plain", id);
   const onDrop = (e, status) => {
@@ -891,7 +935,7 @@ function BoardView({ tasks, onMove, onOpen, onNew, canDecide, onApprove, onRejec
                 <span className="text-xs ml-auto" style={{ color: "var(--c-text-dim)" }}>{items.length}</span>
               </div>
               <div style={{ minHeight: 40 }}>
-                {items.map((t) => <TaskCard key={t.id} task={t} onDragStart={onDragStart} onClick={onOpen} canDecide={canDecide} onApprove={onApprove} onReject={onReject} />)}
+                {items.map((t) => <TaskCard key={t.id} task={t} onDragStart={onDragStart} onClick={onOpen} canDecide={canDecide} onApprove={onApprove} onReject={onReject} settings={settings} />)}
               </div>
             </div>
           );
@@ -905,7 +949,8 @@ function BoardView({ tasks, onMove, onOpen, onNew, canDecide, onApprove, onRejec
 /* Task List                                                              */
 /* ---------------------------------------------------------------------- */
 
-function TaskListView({ tasks, onOpen, onNew, currentUser }) {
+function TaskListView({ tasks, onOpen, onNew, currentUser, settings }) {
+  const STATUSES = getStatuses(settings);
   const [search, setSearch] = useState("");
   const [statusF, setStatusF] = useState("");
   const [prF, setPrF] = useState("");
@@ -1023,7 +1068,8 @@ function TaskListView({ tasks, onOpen, onNew, currentUser }) {
 /* Calendar                                                               */
 /* ---------------------------------------------------------------------- */
 
-function CalendarView({ tasks, users, onOpen }) {
+function CalendarView({ tasks, users, onOpen, settings }) {
+  const STATUSES = getStatuses(settings);
   const [cursor, setCursor] = useState(() => { const d = new Date(); d.setDate(1); return d; });
   const [userFilter, setUserFilter] = useState("");
   const year = cursor.getFullYear(), month = cursor.getMonth();
@@ -1105,12 +1151,53 @@ function CalendarView({ tasks, users, onOpen }) {
 /* Settings                                                                */
 /* ---------------------------------------------------------------------- */
 
+function AccountModal({ currentUser, onClose, onSave, notify }) {
+  const [name, setName] = useState(currentUser.name);
+  const [email, setEmail] = useState(currentUser.email || "");
+  const [password, setPassword] = useState("");
+
+  const save = () => {
+    if (!name.trim() || !email.trim()) { notify("Please fill in name and email", "error"); return; }
+    onSave({ ...currentUser, name: name.trim(), email: email.trim(), password: password.trim() || currentUser.password });
+  };
+
+  return (
+    <Modal title="My Account" onClose={onClose}>
+      <Field label="Username"><div style={{ ...inputStyle, opacity: 0.7 }}>{currentUser.username}</div></Field>
+      <Field label="Role"><div style={{ ...inputStyle, opacity: 0.7 }}>{ROLES.find((r) => r.key === currentUser.role)?.label}</div></Field>
+      <Field label="Name"><Input value={name} onChange={(e) => setName(e.target.value)} /></Field>
+      <Field label="Email"><Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
+      <Field label="New password"><Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Leave blank to keep current password" /></Field>
+      <div className="flex justify-end gap-2 mt-2">
+        <Button variant="ghost" onClick={onClose}>Cancel</Button>
+        <Button onClick={save}>Save</Button>
+      </div>
+    </Modal>
+  );
+}
+
 function SettingsView({ settings, setSettings, users, setUsers, currentUser, notify }) {
   const [url, setUrl] = useState(settings.sheetsUrl);
   const [useSheets, setUseSheets] = useState(settings.useSheets);
   const [testing, setTesting] = useState(false);
   const [newUser, setNewUser] = useState({ username: "", password: "", name: "", email: "", role: "member" });
   const [editingId, setEditingId] = useState(null);
+  const [cfgPrefix, setCfgPrefix] = useState(settings.ticketPrefix || "OPT");
+  const [cfgSlaMin, setCfgSlaMin] = useState(settings.slaMinDays ?? 3);
+  const [cfgSlaMax, setCfgSlaMax] = useState(settings.slaMaxDays ?? 10);
+  const [cfgMaxFile, setCfgMaxFile] = useState(settings.maxFileSizeMB ?? 30);
+  const [cfgTimeout, setCfgTimeout] = useState(settings.uploadTimeoutSec ?? 180);
+  const [cfgIdle, setCfgIdle] = useState(settings.idleTimeoutMin ?? 60);
+  const [columns, setColumns] = useState(settings.kanbanColumns || DEFAULT_KANBAN_MIDDLE);
+  const [newColumnLabel, setNewColumnLabel] = useState("");
+  const [supportTypes, setSupportTypes] = useState(settings.supportTypes || DEFAULT_SUPPORT_TYPES);
+  const [newSupportType, setNewSupportType] = useState("");
+  const [categories, setCategories] = useState(settings.productCategories || DEFAULT_PRODUCT_CATEGORIES);
+  const [reminderDay, setReminderDay] = useState(settings.reminderDay ?? 1);
+  const [reminderHour, setReminderHour] = useState(settings.reminderHour ?? 9);
+  const [applyingSchedule, setApplyingSchedule] = useState(false);
+  const canConfig = ["admin", "lead"].includes(currentUser.role);
+  const sheetsConnected = settings.useSheets && !!settings.sheetsUrl;
 
   const testConnection = async () => {
     if (!url.trim()) { notify("Please enter the Web App URL", "error"); return; }
@@ -1127,10 +1214,105 @@ function SettingsView({ settings, setSettings, users, setUsers, currentUser, not
   };
 
   const save = async () => {
-    const s = { useSheets, sheetsUrl: url.trim() };
+    const s = { ...settings, useSheets, sheetsUrl: url.trim() };
     await saveSettings(s);
     setSettings(s);
     notify("Settings saved", "success");
+  };
+
+  const saveAppConfig = async () => {
+    const s = {
+      ...settings,
+      ticketPrefix: cfgPrefix.trim() || "OPT",
+      slaMinDays: Number(cfgSlaMin) || 3,
+      slaMaxDays: Number(cfgSlaMax) || 10,
+      maxFileSizeMB: Number(cfgMaxFile) || 30,
+      uploadTimeoutSec: Number(cfgTimeout) || 180,
+      idleTimeoutMin: Number(cfgIdle) || 60,
+    };
+    await saveSettings(s);
+    setSettings(s);
+    notify("App configuration saved", "success");
+  };
+
+  const persistColumns = async (list) => {
+    setColumns(list);
+    const s = { ...settings, kanbanColumns: list };
+    await saveSettings(s);
+    setSettings(s);
+  };
+  const addColumn = () => {
+    if (!newColumnLabel.trim()) return;
+    const existingKeys = ["pending", "done", ...columns.map((c) => c.key)];
+    const key = slugifyKey(newColumnLabel, existingKeys);
+    persistColumns([...columns, { key, label: newColumnLabel.trim(), color: COLUMN_COLOR_OPTIONS[0].value }]);
+    setNewColumnLabel("");
+    notify("Column added", "success");
+  };
+  const updateColumn = (idx, patch) => {
+    persistColumns(columns.map((c, i) => (i === idx ? { ...c, ...patch } : c)));
+  };
+  const removeColumn = (idx) => {
+    persistColumns(columns.filter((_, i) => i !== idx));
+    notify("Column removed — existing tasks keep their status but won't show a column on the board", "info");
+  };
+  const moveColumn = (idx, dir) => {
+    const next = [...columns];
+    const target = idx + dir;
+    if (target < 0 || target >= next.length) return;
+    [next[idx], next[target]] = [next[target], next[idx]];
+    persistColumns(next);
+  };
+
+  const persistSupportTypes = async (list) => {
+    setSupportTypes(list);
+    const s = { ...settings, supportTypes: list };
+    await saveSettings(s);
+    setSettings(s);
+  };
+  const addSupportType = () => {
+    if (!newSupportType.trim() || supportTypes.includes(newSupportType.trim())) return;
+    persistSupportTypes([...supportTypes, newSupportType.trim()]);
+    setNewSupportType("");
+  };
+  const removeSupportType = (idx) => persistSupportTypes(supportTypes.filter((_, i) => i !== idx));
+
+  const persistCategories = async (list) => {
+    setCategories(list);
+    const s = { ...settings, productCategories: list };
+    await saveSettings(s);
+    setSettings(s);
+  };
+  const addCategory = () => persistCategories([...categories, { group: "New group", items: [] }]);
+  const updateCategoryGroup = (idx, group) => persistCategories(categories.map((c, i) => (i === idx ? { ...c, group } : c)));
+  const updateCategoryItems = (idx, itemsText) => {
+    const items = itemsText.split(",").map((s) => s.trim()).filter(Boolean);
+    persistCategories(categories.map((c, i) => (i === idx ? { ...c, items } : c)));
+  };
+  const removeCategory = (idx) => persistCategories(categories.filter((_, i) => i !== idx));
+
+  const applyReminderSchedule = async () => {
+    if (!sheetsConnected) { notify("Connect Google Sheets first", "error"); return; }
+    setApplyingSchedule(true);
+    try {
+      const res = await fetch(settings.sheetsUrl, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ action: "updateReminderSchedule", day: Number(reminderDay), hour: Number(reminderHour) }),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        const s = { ...settings, reminderDay: Number(reminderDay), reminderHour: Number(reminderHour) };
+        await saveSettings(s);
+        setSettings(s);
+        notify("Reminder schedule updated", "success");
+      } else {
+        notify("Failed to update schedule — check the Apps Script is the latest version", "error");
+      }
+    } catch {
+      notify("Failed to update schedule", "error");
+    }
+    setApplyingSchedule(false);
   };
 
   const addUser = () => {
@@ -1169,6 +1351,14 @@ function SettingsView({ settings, setSettings, users, setUsers, currentUser, not
     notify("Member removed", "success");
   };
 
+  if (!canConfig) {
+    return (
+      <div className="p-5 md:p-8">
+        <p className="text-sm" style={{ color: "var(--c-text-dim)" }}>You don't have access to this page.</p>
+      </div>
+    );
+  }
+
   return (
     <div className="p-5 md:p-8 max-w-2xl space-y-6">
       <div className="rounded-xl p-5" style={{ background: "var(--c-surface)", border: "1px solid var(--c-border)" }}>
@@ -1189,6 +1379,105 @@ function SettingsView({ settings, setSettings, users, setUsers, currentUser, not
           </Button>
           <Button onClick={save}>Save settings</Button>
         </div>
+      </div>
+
+      <div className="rounded-xl p-5" style={{ background: "var(--c-surface)", border: "1px solid var(--c-border)" }}>
+        <h3 className="font-semibold mb-3 flex items-center gap-2"><SettingsIcon size={16} /> App Configuration</h3>
+        <Field label="Ticket ID Prefix"><Input value={cfgPrefix} onChange={(e) => setCfgPrefix(e.target.value)} placeholder="OPT" /></Field>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Field label="SLA minimum days (Test Report)"><Input type="number" min="0" value={cfgSlaMin} onChange={(e) => setCfgSlaMin(e.target.value)} /></Field>
+          <Field label="SLA maximum days (Test Report)"><Input type="number" min="0" value={cfgSlaMax} onChange={(e) => setCfgSlaMax(e.target.value)} /></Field>
+          <Field label="Max attachment size (MB)"><Input type="number" min="1" value={cfgMaxFile} onChange={(e) => setCfgMaxFile(e.target.value)} /></Field>
+          <Field label="Upload timeout (seconds)"><Input type="number" min="10" value={cfgTimeout} onChange={(e) => setCfgTimeout(e.target.value)} /></Field>
+          <Field label="Auto sign-out (minutes)"><Input type="number" min="1" value={cfgIdle} onChange={(e) => setCfgIdle(e.target.value)} /></Field>
+        </div>
+        <Button onClick={saveAppConfig}>Save configuration</Button>
+      </div>
+
+      <div className="rounded-xl p-5" style={{ background: "var(--c-surface)", border: "1px solid var(--c-border)" }}>
+        <h3 className="font-semibold mb-1 flex items-center gap-2"><Trello size={16} /> Kanban Columns</h3>
+        <p className="text-xs mb-3" style={{ color: "var(--c-text-dim)" }}>
+          "Pending Approval" and "Done" are fixed. Manage the stages in between.
+        </p>
+        <div className="space-y-2 mb-3">
+          {columns.map((col, idx) => (
+            <div key={col.key} className="flex items-center gap-2 p-2 rounded-lg" style={{ background: "var(--c-surface-2)" }}>
+              <div className="flex flex-col gap-0.5">
+                <button onClick={() => moveColumn(idx, -1)} disabled={idx === 0} style={{ color: "var(--c-text-dim)", opacity: idx === 0 ? 0.3 : 1 }}><ChevronLeft size={12} style={{ transform: "rotate(90deg)" }} /></button>
+                <button onClick={() => moveColumn(idx, 1)} disabled={idx === columns.length - 1} style={{ color: "var(--c-text-dim)", opacity: idx === columns.length - 1 ? 0.3 : 1 }}><ChevronRight size={12} style={{ transform: "rotate(90deg)" }} /></button>
+              </div>
+              <Input value={col.label} onChange={(e) => updateColumn(idx, { label: e.target.value })} style={{ flex: 1 }} />
+              <Select value={col.color} onChange={(e) => updateColumn(idx, { color: e.target.value })} style={{ width: 110 }}>
+                {COLUMN_COLOR_OPTIONS.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+              </Select>
+              <button onClick={() => removeColumn(idx)} style={{ color: "var(--c-danger)" }}><Trash2 size={15} /></button>
+            </div>
+          ))}
+          {columns.length === 0 && <p className="text-xs" style={{ color: "var(--c-text-dim)" }}>No middle columns — tasks go straight from Pending Approval to Done.</p>}
+        </div>
+        <div className="flex gap-2">
+          <Input placeholder="New column name" value={newColumnLabel} onChange={(e) => setNewColumnLabel(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && addColumn()} />
+          <Button size="sm" onClick={addColumn}><Plus size={14} /> Add column</Button>
+        </div>
+      </div>
+
+      <div className="rounded-xl p-5" style={{ background: "var(--c-surface)", border: "1px solid var(--c-border)" }}>
+        <h3 className="font-semibold mb-3">Support Types</h3>
+        <div className="flex flex-wrap gap-2 mb-3">
+          {supportTypes.map((s, idx) => (
+            <div key={s} className="flex items-center gap-1.5 text-xs pl-2.5 pr-1.5 py-1 rounded-md" style={{ background: "var(--c-surface-2)", border: "1px solid var(--c-border)" }}>
+              {s}
+              <button onClick={() => removeSupportType(idx)} style={{ color: "var(--c-text-dim)" }}><X size={12} /></button>
+            </div>
+          ))}
+        </div>
+        <div className="flex gap-2">
+          <Input placeholder="New support type" value={newSupportType} onChange={(e) => setNewSupportType(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && addSupportType()} />
+          <Button size="sm" onClick={addSupportType}><Plus size={14} /> Add</Button>
+        </div>
+      </div>
+
+      <div className="rounded-xl p-5" style={{ background: "var(--c-surface)", border: "1px solid var(--c-border)" }}>
+        <h3 className="font-semibold mb-3">Product Categories</h3>
+        <div className="space-y-3 mb-3">
+          {categories.map((cat, idx) => (
+            <div key={idx} className="p-3 rounded-lg" style={{ background: "var(--c-surface-2)" }}>
+              <div className="flex items-center gap-2 mb-2">
+                <Input value={cat.group} onChange={(e) => updateCategoryGroup(idx, e.target.value)} placeholder="Group name" style={{ flex: 1 }} />
+                <button onClick={() => removeCategory(idx)} style={{ color: "var(--c-danger)" }}><Trash2 size={15} /></button>
+              </div>
+              <TextArea defaultValue={cat.items.join(", ")} onBlur={(e) => updateCategoryItems(idx, e.target.value)} placeholder="Items, separated by commas" />
+            </div>
+          ))}
+        </div>
+        <Button size="sm" onClick={addCategory}><Plus size={14} /> Add category</Button>
+      </div>
+
+      <div className="rounded-xl p-5" style={{ background: "var(--c-surface)", border: "1px solid var(--c-border)" }}>
+        <h3 className="font-semibold mb-1">Weekly Reminder Schedule</h3>
+        <p className="text-xs mb-3" style={{ color: "var(--c-text-dim)" }}>
+          Requires Google Sheets to be connected. Changing this re-schedules the reminder in Apps Script — no need to touch the code.
+        </p>
+        <div className="grid grid-cols-2 gap-3 mb-3">
+          <Field label="Day">
+            <Select value={reminderDay} onChange={(e) => setReminderDay(e.target.value)}>
+              <option value="0">Sunday</option>
+              <option value="1">Monday</option>
+              <option value="2">Tuesday</option>
+              <option value="3">Wednesday</option>
+              <option value="4">Thursday</option>
+              <option value="5">Friday</option>
+              <option value="6">Saturday</option>
+            </Select>
+          </Field>
+          <Field label="Hour (24h)"><Input type="number" min="0" max="23" value={reminderHour} onChange={(e) => setReminderHour(e.target.value)} /></Field>
+        </div>
+        <Button onClick={applyReminderSchedule} disabled={applyingSchedule || !sheetsConnected}>
+          {applyingSchedule ? <Loader2 size={14} className="animate-spin" /> : null} Apply schedule
+        </Button>
+        {!sheetsConnected && <p className="text-xs mt-2" style={{ color: "var(--c-text-dim)" }}>Connect Google Sheets above first.</p>}
       </div>
 
       {currentUser.role === "admin" && (
@@ -1247,6 +1536,7 @@ export default function App() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [toast, setToast] = useState(null);
   const [taskModal, setTaskModal] = useState(null); // {} new, {task} edit, null closed
+  const [accountModalOpen, setAccountModalOpen] = useState(false);
 
   const notify = useCallback((msg, type = "success") => {
     setToast({ msg, type });
@@ -1291,13 +1581,14 @@ export default function App() {
   useEffect(() => {
     if (!currentUser) return;
     let timer;
+    const idleMs = (settings.idleTimeoutMin || 60) * 60 * 1000;
     const resetTimer = () => {
       clearTimeout(timer);
       timer = setTimeout(() => {
         setCurrentUser(null);
         saveSession(null);
-        notify("Signed out after 1 hour of inactivity", "info");
-      }, SESSION_IDLE_MS);
+        notify(`Signed out after ${settings.idleTimeoutMin || 60} minute(s) of inactivity`, "info");
+      }, idleMs);
     };
     const events = ["mousemove", "mousedown", "keydown", "touchstart", "scroll"];
     events.forEach((ev) => window.addEventListener(ev, resetTimer));
@@ -1306,7 +1597,7 @@ export default function App() {
       clearTimeout(timer);
       events.forEach((ev) => window.removeEventListener(ev, resetTimer));
     };
-  }, [currentUser, notify]);
+  }, [currentUser, notify, settings.idleTimeoutMin]);
 
   const persist = async (key, data) => {
     try { await saveCollection(key, data, settings); }
@@ -1321,7 +1612,7 @@ export default function App() {
       updateTasks(tasks.map((t) => (t.id === form.id ? { ...form } : t)));
       notify("Task saved");
     } else {
-      const ticket = form.ticket || nextTicket(tasks, "ticket", "OPT");
+      const ticket = form.ticket || nextTicket(tasks, "ticket", settings.ticketPrefix || "OPT");
       updateTasks([...tasks, { ...form, id: uid(), ticket, createdBy: currentUser.name, createdAt: new Date().toISOString() }]);
       notify(form.status === "pending" ? "Request submitted for approval" : "Task saved");
     }
@@ -1372,17 +1663,17 @@ export default function App() {
   return (
     <div className="min-h-screen flex" style={{ background: "var(--c-bg)", color: "var(--c-text)" }}>
       <GlobalStyle />
-      <Sidebar page={page} setPage={setPage} pendingCount={pendingCount} connected={settings.useSheets && !!settings.sheetsUrl} mobileOpen={mobileNavOpen} onClose={() => setMobileNavOpen(false)} />
+      <Sidebar page={page} setPage={setPage} pendingCount={pendingCount} connected={settings.useSheets && !!settings.sheetsUrl} mobileOpen={mobileNavOpen} onClose={() => setMobileNavOpen(false)} canSeeSettings={["admin", "lead"].includes(currentUser.role)} />
       <div className="flex-1 min-w-0 flex flex-col">
-        <Topbar title={pageTitles[page]} user={currentUser} onLogout={handleLogout} onMenuClick={() => setMobileNavOpen(true)} />
+        <Topbar title={pageTitles[page]} user={currentUser} onLogout={handleLogout} onMenuClick={() => setMobileNavOpen(true)} onOpenAccount={() => setAccountModalOpen(true)} />
         <div className="flex-1 overflow-y-auto">
-          {page === "dashboard" && <DashboardView tasks={tasks} />}
+          {page === "dashboard" && <DashboardView tasks={tasks} settings={settings} />}
           {page === "board" && (
             <BoardView tasks={tasks} onMove={moveTask} onOpen={(t) => setTaskModal({ task: t })} onNew={() => setTaskModal({})}
-              canDecide={canDecide} onApprove={approveTask} onReject={rejectTask} />
+              canDecide={canDecide} onApprove={approveTask} onReject={rejectTask} settings={settings} />
           )}
-          {page === "tasks" && <TaskListView tasks={tasks} onOpen={(t) => setTaskModal({ task: t })} onNew={() => setTaskModal({})} currentUser={currentUser} />}
-          {page === "calendar" && <CalendarView tasks={tasks} users={users} onOpen={(t) => setTaskModal({ task: t })} />}
+          {page === "tasks" && <TaskListView tasks={tasks} onOpen={(t) => setTaskModal({ task: t })} onNew={() => setTaskModal({})} currentUser={currentUser} settings={settings} />}
+          {page === "calendar" && <CalendarView tasks={tasks} users={users} onOpen={(t) => setTaskModal({ task: t })} settings={settings} />}
           {page === "settings" && (
             <SettingsView settings={settings} setSettings={setSettings} users={users} setUsers={updateUsers} currentUser={currentUser} notify={notify} />
           )}
@@ -1391,6 +1682,19 @@ export default function App() {
 
       {taskModal !== null && (
         <TaskModal task={taskModal.task} users={users} tasks={tasks} currentUser={currentUser} settings={settings} onClose={() => setTaskModal(null)} onSave={saveTask} onDelete={deleteTask} onAddComment={addComment} onToggleArchive={toggleArchive} notify={notify} />
+      )}
+      {accountModalOpen && (
+        <AccountModal
+          currentUser={currentUser}
+          notify={notify}
+          onClose={() => setAccountModalOpen(false)}
+          onSave={(updated) => {
+            updateUsers(users.map((u) => (u.id === updated.id ? updated : u)));
+            setCurrentUser(updated);
+            setAccountModalOpen(false);
+            notify("Account updated");
+          }}
+        />
       )}
       <Toast toast={toast} />
     </div>
